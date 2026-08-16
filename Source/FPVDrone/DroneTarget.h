@@ -24,7 +24,10 @@ enum class ETargetKind : uint8
 	Vehicle,
 
 	/** Enemy UAVs. Very fragile, but they move in three dimensions. */
-	Drone
+	Drone,
+
+	/** Transport helicopters. Large, tough, and the highest-value air target. */
+	Helicopter
 };
 
 /**

@@ -165,6 +165,17 @@ void ADroneTarget::RebuildBody()
 		break;
 	}
 
+	case ETargetKind::Helicopter:
+	{
+		// Placeholder only -- a real airframe mesh replaces all of this. Fuselage, tail boom,
+		// tail fin and a rotor disc, enough to be identifiable if the mesh ever fails to load.
+		SetPart(0, FVector(0.f, 0.f, 0.f), FVector(Size.X * 0.55f, Size.Y, Size.Z * 0.8f));
+		SetPart(1, FVector(-Size.X * 0.45f, 0.f, Size.Z * 0.1f), FVector(Size.X * 0.5f, Size.Y * 0.25f, Size.Z * 0.25f));
+		SetPart(2, FVector(-Size.X * 0.65f, 0.f, Size.Z * 0.4f), FVector(Size.Y * 0.2f, Size.Y * 0.2f, Size.Z * 0.6f));
+		SetPart(3, FVector(0.f, 0.f, Size.Z * 0.6f), FVector(Size.X * 1.15f, Size.X * 1.15f, 12.f));
+		break;
+	}
+
 	case ETargetKind::Drone:
 	{
 		// Small centre body with four arms. Tiny on purpose -- interception should be hard.
@@ -280,6 +291,7 @@ FString ADroneTarget::GetDisplayName() const
 	case ETargetKind::ElectricalStation: return TEXT("SUBSTATION");
 	case ETargetKind::Vehicle:           return TEXT("VEHICLE");
 	case ETargetKind::Drone:             return TEXT("UAV");
+	case ETargetKind::Helicopter:        return TEXT("HELICOPTER");
 	default:                             return TEXT("TARGET");
 	}
 }

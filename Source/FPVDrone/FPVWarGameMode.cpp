@@ -4,6 +4,7 @@
 #include "FPVDrone.h"
 #include "FPVDronePawn.h"
 #include "FPVHUD.h"
+#include "HelicopterTarget.h"
 #include "VehicleTarget.h"
 
 #include "Engine/World.h"
@@ -109,6 +110,10 @@ namespace
 					D->bPrimaryObjective = false;
 				}
 			});
+
+		// The transport heli, high and crossing. Deliberately the furthest thing out.
+		SpawnTarget(AHelicopterTarget::StaticClass(), Origin + FVector(-8000.f, -8000.f, 4500.f), FRotator(0.f, 45.f, 0.f),
+			[](ADroneTarget* T) {});
 
 		UE_LOG(LogFPV, Log, TEXT("Spawned test targets around %s"), *Origin.ToCompactString());
 	}
