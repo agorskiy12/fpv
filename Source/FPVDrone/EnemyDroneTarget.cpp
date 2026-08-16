@@ -14,6 +14,11 @@ AEnemyDroneTarget::AEnemyDroneTarget()
 	BodySize = FVector(90.f, 90.f, 40.f);
 	bSecondaryExplosion = false;
 
+	// Small and light, so it shatters outright rather than falling as a recognisable wreck.
+	DebrisCount = 14;
+	DebrisSpeed = 700.f;
+	DebrisChunkSize = 30.f;
+
 	// A box circuit, so a freshly placed UAV is already patrolling.
 	RoutePoints = {
 		FVector(0.f, 0.f, 0.f),

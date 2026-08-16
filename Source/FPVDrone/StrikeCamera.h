@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "ImpactShake.h"
 #include "StrikeCamera.generated.h"
 
 class UCameraComponent;
@@ -65,4 +66,10 @@ private:
 	float Distance = 2000.f;
 	float Angle = 0.f;
 	float Height = 800.f;
+
+	/** Shaken on spawn, so the cut lands on the concussion rather than on a steady shot. */
+	FImpactShake Shake;
+
+	/** Blown-out exposure and bloom that decays over the first moments of the blast. */
+	float Flash = 0.f;
 };

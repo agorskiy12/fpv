@@ -53,6 +53,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Vehicle")
 	float FleeSpeedMultiplier = 1.6f;
 
+	/** Vehicles move by translation rather than physics, so velocity is derived from heading. */
+	virtual FVector GetCurrentVelocity() const override { return GetActorForwardVector() * Speed; }
+
 protected:
 	virtual void OnDestroyed_Internal(AActor* Killer) override;
 

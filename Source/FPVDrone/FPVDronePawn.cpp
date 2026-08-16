@@ -63,8 +63,11 @@ void AFPVDronePawn::BeginPlay()
 
 	// The mesh is scaled, so place the camera in world-space centimetres rather than
 	// letting the parent's 0.25/0.08 scale squash the offset.
-	FPVCamera->SetRelativeLocation(FVector(10.f, 0.f, 4.f) / DroneMesh->GetRelativeScale3D());
-	FPVCamera->SetRelativeRotation(FRotator(CameraTiltDegrees, 0.f, 0.f));
+	CameraBaseLocation = FVector(10.f, 0.f, 4.f) / DroneMesh->GetRelativeScale3D();
+	CameraBaseRotation = FRotator(CameraTiltDegrees, 0.f, 0.f);
+
+	FPVCamera->SetRelativeLocation(CameraBaseLocation);
+	FPVCamera->SetRelativeRotation(CameraBaseRotation);
 	FPVCamera->SetFieldOfView(CameraFOV);
 
 	BuildInputAssets();
@@ -314,6 +317,37 @@ void AFPVDronePawn::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	UpdateFlight(DeltaSeconds);
+	UpdateCameraShake(DeltaSeconds);
+}
+
+void AFPVDronePawn::AddImpactShake(float Trauma)
+{
+	CameraShake.Add(Trauma);
+}
+
+void AFPVDronePawn::UpdateCameraShake(float DeltaSeconds)
+{
+	if (!FPVCamera)
+	{
+		return;
+	}
+
+	const bool bWasActive = CameraShake.IsActive();
+	CameraShake.Update(DeltaSeconds);
+
+	if (!CameraShake.IsActive())
+	{
+		// Snap back to the mount exactly once, rather than every frame forever.
+		if (bWasActive)
+		{
+			FPVCamera->SetRelativeLocation(CameraBaseLocation);
+			FPVCamera->SetRelativeRotation(CameraBaseRotation);
+		}
+		return;
+	}
+
+	FPVCamera->SetRelativeLocation(CameraBaseLocation + CameraShake.GetLocationOffset(MaxShakeOffset));
+	FPVCamera->SetRelativeRotation(CameraBaseRotation + CameraShake.GetRotationOffset(MaxShakeAngle));
 }
 
 void AFPVDronePawn::ApplyRCTransmitterInput()

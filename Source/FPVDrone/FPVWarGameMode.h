@@ -118,6 +118,19 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Strike")
 	float ReportDuration = 3.4f;
 
+	/**
+	 * Time dilation applied at the instant of detonation.
+	 *
+	 * Brief, and it does two jobs: it gives weight to the hit, and it buys the eye a moment to
+	 * register what was struck before the camera cuts away.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Strike")
+	float ImpactTimeDilation = 0.35f;
+
+	/** Real seconds the slowdown lasts. Long enough to feel, short enough not to be a cutscene. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Strike")
+	float ImpactSlowMoDuration = 0.18f;
+
 	// --- Mission state ----------------------------------------------------------------------
 
 	UFUNCTION(BlueprintPure, Category = "Mission")
@@ -192,4 +205,8 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<AStrikeCamera> ActiveStrikeCamera;
+
+	/** Tracked in real seconds, because dilated time cannot be used to time its own recovery. */
+	float SlowMoEndRealTime = 0.f;
+	bool bSlowMoActive = false;
 };

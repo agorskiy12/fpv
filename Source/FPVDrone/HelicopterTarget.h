@@ -90,6 +90,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Helicopter")
 	bool IsFleeing() const { return bFleeing; }
 
+	virtual FVector GetCurrentVelocity() const override { return Velocity; }
+
 protected:
 	virtual void OnDestroyed_Internal(AActor* Killer) override;
 

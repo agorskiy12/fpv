@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
+#include "ImpactShake.h"
 #include "FPVDronePawn.generated.h"
 
 class UStaticMeshComponent;
@@ -240,6 +241,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Drone|Warhead")
 	void RearmWarhead();
 
+	/** Shake the FPV camera. Trauma is 0..1; blasts you survive should still be felt. */
+	UFUNCTION(BlueprintCallable, Category = "Drone|Camera")
+	void AddImpactShake(float Trauma);
+
+	/** Peak camera rotation from a full-trauma shake, in degrees. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Camera")
+	float MaxShakeAngle = 4.5f;
+
+	/** Peak camera displacement from a full-trauma shake, in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Camera")
+	float MaxShakeOffset = 6.f;
+
 protected:
 	// Input actions and mappings are built in C++ at runtime, so the project needs no
 	// Input Action assets and no Blueprint wiring to be playable.
@@ -287,6 +300,12 @@ private:
 
 	bool bWarheadArmed = false;
 	bool bWarheadSpent = false;
+
+	FImpactShake CameraShake;
+	FVector CameraBaseLocation = FVector::ZeroVector;
+	FRotator CameraBaseRotation = FRotator::ZeroRotator;
+
+	void UpdateCameraShake(float DeltaSeconds);
 
 	/** Overwrite the stick values from the calibrated transmitter, when one is available. */
 	void ApplyRCTransmitterInput();

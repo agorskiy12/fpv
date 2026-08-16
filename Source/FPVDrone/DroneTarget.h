@@ -147,6 +147,46 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Target")
 	float GetApproximateRadius() const;
 
+	/** Current velocity, so debris and wreckage inherit it. Zero for anything stationary. */
+	UFUNCTION(BlueprintPure, Category = "Target")
+	virtual FVector GetCurrentVelocity() const { return FVector::ZeroVector; }
+
+	// ---------------------------------------------------------------------------------------
+	// Destruction
+	// ---------------------------------------------------------------------------------------
+
+	/** Number of physics chunks thrown on death. Kept modest -- the budget is shared. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Destruction")
+	int32 DebrisCount = 22;
+
+	/** Outward speed of the burst, cm/s. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Destruction")
+	float DebrisSpeed = 900.f;
+
+	/** Rough chunk size in centimetres. Scaled randomly around this. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Destruction")
+	float DebrisChunkSize = 70.f;
+
+	/** Optional real rubble meshes. Falls back to scaled cubes when empty. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Destruction")
+	TArray<TObjectPtr<UStaticMesh>> DebrisMeshes;
+
+	/**
+	 * Fall out of the sky instead of vanishing.
+	 *
+	 * For anything airborne this is the difference between a kill you watch and a kill you are
+	 * merely told about: the wreck keeps its velocity, tumbles, and detonates again on impact.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Destruction")
+	bool bFallOnDestruction = false;
+
+	/** Secondary blast when the wreck hits the ground. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Destruction")
+	float WreckImpactBlastRadius = 1400.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Destruction")
+	float WreckImpactBlastDamage = 90.f;
+
 protected:
 	/** Called once health reaches zero. Subclasses stop their movement here. */
 	virtual void OnDestroyed_Internal(AActor* Killer);
@@ -169,6 +209,15 @@ protected:
 
 	float Health = 100.f;
 	bool bDestroyed = false;
+
+	/** Turn the body into tumbling wreckage carrying the velocity it died with. */
+	void BeginFallingWreck();
+
+	UFUNCTION()
+	void OnWreckHit(UPrimitiveComponent* HitComponent, AActor* OtherActor,
+		UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
+
+	bool bWreckImpacted = false;
 
 	/** Configure one part; parts left unconfigured are hidden. */
 	void SetPart(int32 Index, const FVector& RelativeLocation, const FVector& SizeCm, bool bCylinder = false);

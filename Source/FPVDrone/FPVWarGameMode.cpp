@@ -209,6 +209,18 @@ void AFPVWarGameMode::ApplyBlast(const FVector& Origin, float Radius, float Dama
 		const float Falloff = 1.f - FMath::Clamp(EffectiveDistance / Radius, 0.f, 1.f);
 		Target->ApplyBlastDamage(Damage * Falloff, Origin, DamageCauser);
 	}
+
+	// Shake the operator's camera. Felt well beyond the lethal radius on purpose -- explosions
+	// you survive are most of what makes the ones you do not survive feel dangerous.
+	if (AFPVDronePawn* Drone = Cast<AFPVDronePawn>(UGameplayStatics::GetPlayerPawn(GetWorld(), 0)))
+	{
+		const float Distance = FVector::Dist(Drone->GetActorLocation(), Origin);
+		const float Trauma = FImpactShake::TraumaFromBlast(Distance, Radius);
+		if (Trauma > 0.f)
+		{
+			Drone->AddImpactShake(Trauma);
+		}
+	}
 }
 
 void AFPVWarGameMode::RegisterTarget(ADroneTarget* Target)
@@ -290,6 +302,12 @@ void AFPVWarGameMode::NotifyDroneDetonated(AFPVDronePawn* Drone, const FVector& 
 		--DronesRemaining;
 	}
 
+	// Brief slowdown at the moment of impact. Timed against real seconds, since dilated time
+	// cannot be used to measure its own recovery.
+	UGameplayStatics::SetGlobalTimeDilation(GetWorld(), ImpactTimeDilation);
+	SlowMoEndRealTime = GetWorld()->GetRealTimeSeconds() + ImpactSlowMoDuration;
+	bSlowMoActive = true;
+
 	ActiveStrikeCamera = AStrikeCamera::Spawn(GetWorld(), BlastLocation, ApproachDirection, BlastRadius);
 
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
@@ -332,6 +350,12 @@ bool AFPVWarGameMode::WantsToSkipStrikeSequence() const
 void AFPVWarGameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	if (bSlowMoActive && GetWorld()->GetRealTimeSeconds() >= SlowMoEndRealTime)
+	{
+		bSlowMoActive = false;
+		UGameplayStatics::SetGlobalTimeDilation(GetWorld(), 1.f);
+	}
 
 	if (StrikeState == EStrikeState::Flying)
 	{

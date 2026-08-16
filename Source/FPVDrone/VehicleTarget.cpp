@@ -17,6 +17,11 @@ AVehicleTarget::AVehicleTarget()
 	SecondaryBlastRadius = 700.f;
 	SecondaryBlastDamage = 70.f;
 
+	// Panels and glass, thrown along the direction it was driving.
+	DebrisCount = 26;
+	DebrisSpeed = 1100.f;
+	DebrisChunkSize = 55.f;
+
 	// A short there-and-back so a freshly placed vehicle already moves.
 	RoutePoints = { FVector(0.f, 0.f, 0.f), FVector(4000.f, 0.f, 0.f) };
 }

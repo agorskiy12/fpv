@@ -1,4 +1,5 @@
 #include "DroneTarget.h"
+#include "DebrisChunk.h"
 #include "ExplosionEffect.h"
 #include "FPVDrone.h"
 #include "FPVWarGameMode.h"
@@ -266,6 +267,31 @@ void ADroneTarget::OnDestroyed_Internal(AActor* Killer)
 		}
 	}
 
+	// Throw physical debris. This is what actually reads as the target coming apart.
+	{
+		TArray<UStaticMesh*> Chunks;
+		Chunks.Reserve(DebrisMeshes.Num());
+		for (const TObjectPtr<UStaticMesh>& Entry : DebrisMeshes)
+		{
+			if (Entry)
+			{
+				Chunks.Add(Entry);
+			}
+		}
+
+		ADebrisChunk::SpawnBurst(GetWorld(), Centre, GetCurrentVelocity(),
+			DebrisCount, DebrisSpeed, DebrisChunkSize, Chunks);
+	}
+
+	// Airborne targets fall rather than vanish, and everything below is skipped -- the body is
+	// still needed to tumble.
+	if (bFallOnDestruction && OverrideMesh && BodyMesh)
+	{
+		BeginFallingWreck();
+		UE_LOG(LogFPV, Log, TEXT("Destroyed: %s (+%d) -- going down"), *GetDisplayName(), ScoreValue);
+		return;
+	}
+
 	// A wreck mesh leaves something behind to fly past; without one the target simply goes away.
 	if (DestroyedMesh)
 	{
@@ -297,6 +323,65 @@ void ADroneTarget::OnDestroyed_Internal(AActor* Killer)
 // ---------------------------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------------------------
+
+void ADroneTarget::BeginFallingWreck()
+{
+	// Hand the body over to the physics solver, carrying the velocity it was flying at. Dead
+	// engines mean it keeps its momentum and loses its lift, which is exactly what falling is.
+	OverrideMesh->SetCollisionProfileName(TEXT("PhysicsActor"));
+	OverrideMesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	OverrideMesh->SetSimulatePhysics(true);
+	OverrideMesh->SetEnableGravity(true);
+	OverrideMesh->SetNotifyRigidBodyCollision(true);
+
+	OverrideMesh->SetPhysicsLinearVelocity(GetCurrentVelocity());
+
+	// Tumble hard enough to read as out of control, but not so fast it becomes a blur.
+	OverrideMesh->SetPhysicsAngularVelocityInDegrees(
+		FVector(FMath::FRandRange(-90.f, 90.f), FMath::FRandRange(-60.f, 60.f), FMath::FRandRange(-160.f, 160.f)));
+
+	OverrideMesh->OnComponentHit.AddDynamic(this, &ADroneTarget::OnWreckHit);
+
+	// Trail smoke the whole way down so it is trackable against the sky.
+	AExplosionEffect::Spawn(GetWorld(), GetAimPoint(), GetApproximateRadius() * 0.8f, 0.5f);
+}
+
+void ADroneTarget::OnWreckHit(UPrimitiveComponent* /*HitComponent*/, AActor* /*OtherActor*/,
+	UPrimitiveComponent* /*OtherComp*/, FVector /*NormalImpulse*/, const FHitResult& Hit)
+{
+	if (bWreckImpacted)
+	{
+		return;
+	}
+	bWreckImpacted = true;
+
+	const FVector ImpactPoint = Hit.ImpactPoint;
+
+	AExplosionEffect::Spawn(GetWorld(), ImpactPoint, WreckImpactBlastRadius, 1.6f);
+
+	if (AFPVWarGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AFPVWarGameMode>() : nullptr)
+	{
+		GameMode->ApplyBlast(ImpactPoint, WreckImpactBlastRadius, WreckImpactBlastDamage, this, this);
+	}
+
+	// A second burst on impact, so the ground hit is its own event rather than a quiet landing.
+	TArray<UStaticMesh*> Chunks;
+	for (const TObjectPtr<UStaticMesh>& Entry : DebrisMeshes)
+	{
+		if (Entry)
+		{
+			Chunks.Add(Entry);
+		}
+	}
+	ADebrisChunk::SpawnBurst(GetWorld(), ImpactPoint, FVector::ZeroVector,
+		DebrisCount, DebrisSpeed * 0.8f, DebrisChunkSize, Chunks);
+
+	UE_LOG(LogFPV, Log, TEXT("%s wreck impacted at %s"), *GetDisplayName(), *ImpactPoint.ToCompactString());
+
+	// Leave the hull lying there for a while, then clear it.
+	OverrideMesh->SetSimulatePhysics(false);
+	SetLifeSpan(25.f);
+}
 
 FVector ADroneTarget::GetAimPoint() const
 {

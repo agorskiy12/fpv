@@ -51,6 +51,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Enemy Drone")
 	bool IsEvading() const { return bEvading; }
 
+	virtual FVector GetCurrentVelocity() const override { return Velocity; }
+
 protected:
 	virtual void OnDestroyed_Internal(AActor* Killer) override;
 

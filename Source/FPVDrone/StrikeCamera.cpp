@@ -48,6 +48,10 @@ AStrikeCamera* AStrikeCamera::Spawn(UWorld* World, const FVector& BlastLocation,
 
 	Cam->Angle = FMath::Atan2(Approach.Y, Approach.X) + FMath::DegreesToRadians(130.f);
 
+	// The cut should land on the concussion, not on a calm establishing shot.
+	Cam->Shake.Add(0.85f);
+	Cam->Flash = 1.f;
+
 	Cam->Tick(0.f);   // frame it before the first render, so there is no one-frame pop
 	return Cam;
 }
@@ -67,4 +71,30 @@ void AStrikeCamera::Tick(float DeltaSeconds)
 	const FVector NewLocation = FocusPoint + Offset;
 	SetActorLocation(NewLocation);
 	SetActorRotation(UKismetMathLibrary::FindLookAtRotation(NewLocation, FocusPoint));
+
+	// Shake is applied to the camera component rather than the actor, so the framing stays
+	// locked on the blast while the lens is knocked about.
+	Shake.Update(DeltaSeconds);
+	if (Camera)
+	{
+		Camera->SetRelativeRotation(Shake.GetRotationOffset(3.0f));
+		Camera->SetRelativeLocation(Shake.GetLocationOffset(14.f));
+
+		// Blow the exposure out at the moment of detonation and recover, so the fireball
+		// overwhelms the frame instead of politely lighting it.
+		Flash = FMath::Max(0.f, Flash - DeltaSeconds * 2.6f);
+		if (Flash > 0.f)
+		{
+			const float Curve = Flash * Flash;
+			Camera->PostProcessBlendWeight = Curve;
+			Camera->PostProcessSettings.bOverride_BloomIntensity = true;
+			Camera->PostProcessSettings.BloomIntensity = 4.5f;
+			Camera->PostProcessSettings.bOverride_AutoExposureBias = true;
+			Camera->PostProcessSettings.AutoExposureBias = 2.2f;
+		}
+		else
+		{
+			Camera->PostProcessBlendWeight = 0.f;
+		}
+	}
 }

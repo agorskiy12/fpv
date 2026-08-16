@@ -24,6 +24,15 @@ AHelicopterTarget::AHelicopterTarget()
 	SecondaryBlastRadius = 1600.f;
 	SecondaryBlastDamage = 120.f;
 
+	// The best kill in the game: it keeps its momentum, tumbles out of the sky trailing smoke,
+	// and goes up again when it lands.
+	bFallOnDestruction = true;
+	DebrisCount = 34;
+	DebrisSpeed = 1300.f;
+	DebrisChunkSize = 110.f;
+	WreckImpactBlastRadius = 2000.f;
+	WreckImpactBlastDamage = 140.f;
+
 	// Auto-assign the Fab airframe so the class works without anyone wiring it up. If the asset
 	// moves or is missing, BodyMesh stays null and the primitive placeholder takes over.
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> HeliMesh(
