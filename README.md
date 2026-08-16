@@ -163,15 +163,91 @@ Source/
     FPVDronePawn.h/.cpp      flight model, input, camera
     RaceGate.h/.cpp          gate frame + pass trigger
     FPVGameMode.h/.cpp       gate ordering and lap timing
-    FPVHUD.h/.cpp            Canvas HUD + channel monitor overlay
+    FPVHUD.h/.cpp            Canvas HUD, channel monitor, device picker, wizard
     RCChannelMonitor.h/.cpp  RC axis sampling and range tracking
+    RCDeviceRegistry.h/.cpp  HID enumeration, usage registration, report decoding
+    RCChannelMapping.h/.cpp  channel assignment, calibration, persistence
 ```
+
+## Console reference
+
+| Command | Purpose |
+|---|---|
+| `fpv.ShowChannels 1` | Channel monitor overlay (`2` for all 28 rows) |
+| `fpv.ShowDevices 1` | Device picker; number keys select |
+| `fpv.Calibrate` | Channel assignment wizard |
+| `fpv.SetChannel yaw 5` | Assign a channel to an axis directly |
+| `fpv.InvertChannel pitch 1` | Invert a channel |
+| `fpv.Tango2Defaults` | Restore throttle 8, yaw 5, roll 7, pitch 6 |
+| `fpv.LogChannels 1` | Log axis values, focus and registration state |
+| `fpv.RefreshDevices` | Re-enumerate after plugging hardware in |
+| `fpv.ReRegisterDevice` | Rebind RawInput to the current window |
+| `fpv.ResetChannelRanges` | Clear observed min/max |
 
 ---
 
 # Changelog
 
-## Unreleased — RC transmitter groundwork
+## Unreleased — TBS Tango 2 flying
+
+The radio now drives the sim. Getting there took three separate faults, only one of which was
+the one originally suspected.
+
+### Added
+
+- **`FRCDeviceRegistry`** — enumerates HID devices with `GetRawInputDeviceList`, reads product
+  names via `HidD_GetProductString`, auto-selects a known radio (then any gamepad, then any
+  joystick), and registers the chosen device's HID usage with RawInput explicitly.
+- **Device picker overlay** — `fpv.ShowDevices`, number keys `1`–`9` to select, plus
+  `fpv.SelectDevice` and `fpv.RefreshDevices`.
+- **Direct HID report decoding** — `HidP_GetValueCaps` / `HidP_GetUsageValue`, normalising each
+  axis against its own logical range and handling both range and non-range usage caps.
+- **`FRCChannelMapping`** — assigns raw axes to throttle/roll/pitch/yaw, normalises them, and
+  persists to config.
+- **Calibration wizard** — `fpv.Calibrate` prompts for each stick in turn and assigns whichever
+  axis actually moves. Manual overrides: `fpv.SetChannel`, `fpv.InvertChannel`,
+  `fpv.Tango2Defaults`.
+- **Flight model wiring** — the pawn takes stick input from a calibrated transmitter when one is
+  present, falling back to keyboard and gamepad otherwise.
+- **Diagnostics** — per-type raw packet counters, `fpv.LogChannels` (logs axis values alongside
+  focus and registration state), `fpv.ReRegisterDevice`.
+- **Mouse cursor released by default** (`bReleaseMouseCursor`). A drone sim never uses the mouse,
+  and capturing it hides whether the window has focus — which RawInput depends on.
+
+### The three faults
+
+1. **RawInput never subscribed to the radio.** Its startup path registers HID usage `0x04`
+   (Joystick) and only falls back to `0x05` (Gamepad) if that call *fails*
+   (`RawInputWindows.cpp:97-111`). A Tango 2 is usage `0x05`, so any attached joystick made the
+   first call succeed and silently hid the radio. Fixed by setting `bRegisterDefaultDevice=False`
+   and registering the selected device's usage directly.
+
+2. **Registration lost a startup race.** RawInput creates its input device during Slate startup,
+   *after* the first HUD draw, so a single attempt always failed with "device not created yet".
+   Now retried every frame until it takes.
+
+3. **RawInput's parser never ran.** This was the real one. Instrumenting the raw `WM_INPUT`
+   delegate showed `pkt == hid == mine` — the Tango 2 was streaming into the process at its full
+   125 Hz the entire time. But `ParseInputData` logs a warning on every parse failure and there
+   were none: it was never being *entered*. Packets die at the device match in `ProcessMessage`
+   (`RawInputWindows.cpp:556-573`) before parsing is attempted.
+
+   The engine plugin cannot be patched and is deprecated anyway, so reports are now decoded
+   directly. RawInput is used for exactly one thing: the `WM_INPUT` subscription.
+
+### Notes
+
+- **Tango 2 channel order is neither AETR nor TAER** — throttle 8, yaw 5, roll 7, pitch 6.
+  Confirmed against the hardware. An attempt to infer it from a timed stick sweep was ambiguous
+  (two axes moved within one sample of each other), which is why assignment is now done by
+  moving one stick at a time rather than by inference.
+- **Centre is sampled separately from the endpoints.** Gimbal travel is rarely symmetric, and
+  treating the midpoint of min and max as centre produces drift you feel constantly at rest.
+- **Diagnosing this needed the log, not the screen.** `fpv.LogChannels` exists because reasoning
+  about what the overlay *might* be showing produced two wrong theories in a row; printing focus,
+  registration state and packet counts settled it in one run.
+
+## 0.2.0 — RC transmitter groundwork
 
 Phase 1 of [docs/RC_TRANSMITTER_PLAN.md](docs/RC_TRANSMITTER_PLAN.md): make it possible to
 discover how a real radio presents itself, before writing any code that depends on the answer.
@@ -287,8 +363,10 @@ Resolved while getting the first compile through:
 
 | | |
 |---|---|
-| Game target, current code | **Builds clean** — zero warnings, zero errors |
-| Editor target, current code | **Builds clean** — zero warnings, zero errors |
-| Flight model behaviour | **Never run.** No level has been flown yet |
-| Axis sign mapping | **Unverified** — derived by hand, see *Known first-flight check* above |
-| Channel monitor | **Compiles, never displayed.** Needs an editor-target build and a level |
+| Game and editor targets | **Build clean** — zero warnings, zero errors |
+| TBS Tango 2 input | **Working** — detected, decoded, mapped, driving the flight model |
+| Channel monitor and device picker | **Working** — verified on hardware |
+| Flight model behaviour | **Flies.** Not yet tuned against real-world feel |
+| Physics axis sign mapping | **Unverified** — derived by hand, see *Known first-flight check*. An axis responding backwards is expected here first |
+| Channel endpoints | **Defaults only.** Full 0..1 assumed; axis 6 was observed reaching only 0.153–0.863, so run `fpv.Calibrate` for full deflection |
+| Race gates and lap timing | **Never exercised** — no gates placed in a level yet |

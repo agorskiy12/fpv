@@ -111,7 +111,22 @@ Goal: see live numbers from the device on screen. Nothing else can be debugged u
 
 **Exit criterion:** wiggle a stick, watch the right bar move.
 
+> **Outcome:** the monitor worked, but revealed that RawInput's own parser never runs for this
+> device. Reports are now decoded directly with `HidP_*` in `FRCDeviceRegistry`. See the README
+> changelog for the full diagnosis. RawInput is used only for the `WM_INPUT` subscription, which
+> also defuses the deprecation risk.
+
 ## Phase 2 — Calibration layer
+
+**Status: done.** `FRCChannelMapping` — piecewise normalisation around a separately sampled
+centre, persisted to config, with the `fpv.Calibrate` wizard assigning channels by movement
+rather than inference. Tango 2 defaults (throttle 8, yaw 5, roll 7, pitch 6) applied
+automatically when the radio is recognised.
+
+*Still to do:* endpoints are defaults, not measured. Axis 6 was seen reaching only 0.153–0.863,
+so a calibration pass is needed for full deflection on that channel.
+
+## Phase 2 (original plan)
 
 Goal: turn raw driver values into clean −1..1 channels.
 
@@ -132,6 +147,14 @@ Goal: turn raw driver values into clean −1..1 channels.
 **Exit criterion:** all four channels read −1.00 / 0.00 / +1.00 at the stops and centre.
 
 ## Phase 3 — Wire into the flight model
+
+**Status: done.** `AFPVDronePawn::ApplyRCTransmitterInput` takes stick values from the
+calibrated transmitter when one is present and falls back to keyboard and gamepad otherwise.
+
+**Next session starts here → Phase 4.** Arming is the most valuable remaining item: it is how a
+real quad behaves, and it properly solves the drone climbing on its own at idle.
+
+## Phase 3 (original plan)
 
 8. Route `AFPVDronePawn`'s stick values through the calibrated channels instead of reading the
    Enhanced Input axis directly.
