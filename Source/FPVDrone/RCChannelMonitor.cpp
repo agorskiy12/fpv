@@ -1,11 +1,22 @@
 #include "RCChannelMonitor.h"
 #include "FPVDrone.h"
+#include "RCDeviceRegistry.h"
 
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
+#include "Misc/App.h"
 
 namespace
 {
+	static TAutoConsoleVariable<int32> CVarLogChannels(
+		TEXT("fpv.LogChannels"),
+		0,
+		TEXT("Write RC axis values to the log twice a second.\n")
+		TEXT("Useful when the on-screen overlay cannot be observed directly -- the log line\n")
+		TEXT("also reports window focus and RawInput registration state, which are the two\n")
+		TEXT("things that stop input arriving."),
+		ECVF_Default);
+
 	/** Set by the console command, consumed by the next Sample. Avoids plumbing an instance pointer to the console. */
 	bool GResetRangesRequested = false;
 
@@ -66,9 +77,17 @@ void FRCChannelMonitor::Sample(const APlayerController* PC)
 		ResetRanges();
 	}
 
+	// Direct HID parsing is authoritative when it is working. RawInput's own parser never runs
+	// for this device, so its keys stay at zero; fall back to them only when we have no report
+	// of our own (a device the direct parser has not seen, or a non-Windows build).
+	const FRCDeviceRegistry& DeviceRegistry = FRCDeviceRegistry::Get();
+	const bool bUseParsedReport = DeviceRegistry.HasParsedReport();
+
 	for (int32 Index = 0; Index < MaxAxes; ++Index)
 	{
-		const float NewValue = PC->GetInputAnalogKeyState(AxisKeys[Index]);
+		const float NewValue = (bUseParsedReport && Index < FRCDeviceRegistry::MaxParsedAxes)
+			? DeviceRegistry.GetParsedAxis(Index)
+			: PC->GetInputAnalogKeyState(AxisKeys[Index]);
 
 		if (bSeeded && FMath::Abs(NewValue - Values[Index]) > MovementThreshold)
 		{
@@ -90,9 +109,12 @@ void FRCChannelMonitor::Sample(const APlayerController* PC)
 		}
 	}
 
+	const uint32 ParsedButtonMask = DeviceRegistry.GetParsedButtons();
 	for (int32 Index = 0; Index < MaxButtons; ++Index)
 	{
-		const bool bDown = PC->IsInputKeyDown(ButtonKeys[Index]);
+		const bool bDown = bUseParsedReport
+			? ((ParsedButtonMask & (1u << Index)) != 0)
+			: PC->IsInputKeyDown(ButtonKeys[Index]);
 		if (bDown && !bButtonDown[Index])
 		{
 			bHasSeenInput = true;
@@ -101,6 +123,37 @@ void FRCChannelMonitor::Sample(const APlayerController* PC)
 	}
 
 	bSeeded = true;
+
+	if (CVarLogChannels.GetValueOnGameThread() != 0)
+	{
+		const double Now = FPlatformTime::Seconds();
+		if (Now - LastLogTime > 0.5)
+		{
+			LastLogTime = Now;
+
+			FString Line;
+			for (int32 Index = 0; Index < MaxAxes; ++Index)
+			{
+				if (HasMoved(Index) || FMath::Abs(Values[Index]) > 0.005f)
+				{
+					Line += FString::Printf(TEXT("%s=%+.3f  "), *GetAxisLabel(Index), Values[Index]);
+				}
+			}
+			if (Line.IsEmpty())
+			{
+				Line = TEXT("(every axis reading exactly zero)");
+			}
+
+			const FRCDeviceRegistry& Registry = FRCDeviceRegistry::Get();
+			UE_LOG(LogFPV, Log, TEXT("RC [focus=%s reg=%s pkt=%lld hid=%lld mine=%lld] %s"),
+				FApp::HasFocus() ? TEXT("yes") : TEXT("NO"),
+				Registry.IsRegistered() ? TEXT("yes") : TEXT("NO"),
+				Registry.GetRawPacketCount(),
+				Registry.GetRawHidPacketCount(),
+				Registry.GetRawSelectedPacketCount(),
+				*Line);
+		}
+	}
 }
 
 void FRCChannelMonitor::ResetRanges()

@@ -85,6 +85,9 @@ private:
 	float MaxSeen[MaxAxes];
 	bool bButtonDown[MaxButtons];
 
+	/** Throttles fpv.LogChannels output to something readable. */
+	double LastLogTime = 0.0;
+
 	/** Ranges are seeded from the first sample rather than from a sentinel, so the readout is honest before any input arrives. */
 	bool bSeeded = false;
 	bool bHasSeenInput = false;

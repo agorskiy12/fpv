@@ -47,6 +47,18 @@ namespace
 				FRCDeviceRegistry::Get().GetGameDeviceIndices().Num());
 		}));
 
+	FAutoConsoleCommand CmdReRegisterDevice(
+		TEXT("fpv.ReRegisterDevice"),
+		TEXT("Re-register the selected device with RawInput, binding it to the window that is "
+			 "active right now. Use this if input stops arriving after alt-tabbing."),
+		FConsoleCommandDelegate::CreateStatic([]()
+		{
+			const bool bOK = FRCDeviceRegistry::Get().ForceReRegister();
+			UE_LOG(LogFPV, Log, TEXT("Re-registration %s: %s"),
+				bOK ? TEXT("succeeded") : TEXT("failed"),
+				*FRCDeviceRegistry::Get().GetStatusMessage());
+		}));
+
 	FAutoConsoleCommand CmdSelectDevice(
 		TEXT("fpv.SelectDevice"),
 		TEXT("Select a flyable device by menu slot number, e.g. 'fpv.SelectDevice 1'."),
@@ -80,7 +92,7 @@ void AFPVHUD::DrawHUD()
 
 	// Retried every frame: RawInput's device is created after the first HUD draw, so a single
 	// attempt at startup always loses that race.
-	FRCDeviceRegistry::Get().TickRegistration();
+	FRCDeviceRegistry::Get().TickRegistration(ChannelMonitor.HasSeenAnyInput());
 
 	// Sampled unconditionally so the observed ranges keep accumulating while the overlay is
 	// hidden, and drawn before the pawn check so it still works if possession failed.
