@@ -31,15 +31,65 @@ AExplosionEffect::AExplosionEffect()
 	BlastForce->ImpulseStrength = 1400.f;
 	BlastForce->DestructibleDamage = 0.f;
 
-	// Convention over configuration: author a Niagara system at this path and it is picked up
-	// automatically, switching off the placeholder with no wiring. See docs/NIAGARA_EXPLOSION.md.
-	// Absent, the finder quietly fails and the fallback stays in place.
-	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> DefaultExplosionFX(
-		TEXT("/Game/FX/NS_Explosion.NS_Explosion"));
-	if (DefaultExplosionFX.Succeeded())
+	// Size-graded systems from the Fire_EXP_Vol01_Free pack. Each finder fails quietly if the
+	// pack is absent, leaving the code fallback in place.
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> SmallFX(
+		TEXT("/Game/Fire_EXP_Vol01_Free/Niagara/EXP/NS_Sub_EXP_Small_002.NS_Sub_EXP_Small_002"));
+	if (SmallFX.Succeeded())
 	{
-		ExplosionFX = DefaultExplosionFX.Object;
+		ExplosionFXSmall = SmallFX.Object;
 	}
+
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> MediumFX(
+		TEXT("/Game/Fire_EXP_Vol01_Free/Niagara/EXP/NS_Sub_EXP_Mid_002_02.NS_Sub_EXP_Mid_002_02"));
+	if (MediumFX.Succeeded())
+	{
+		ExplosionFXMedium = MediumFX.Object;
+	}
+
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> LargeFX(
+		TEXT("/Game/Fire_EXP_Vol01_Free/Niagara/EXP/NS_Sub_EXP_Large_001_01.NS_Sub_EXP_Large_001_01"));
+	if (LargeFX.Succeeded())
+	{
+		ExplosionFXLarge = LargeFX.Object;
+	}
+
+	// Convention over configuration: a system authored at this path overrides the pack outright.
+	// See docs/NIAGARA_EXPLOSION.md.
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> AuthoredFX(
+		TEXT("/Game/FX/NS_Explosion.NS_Explosion"));
+	if (AuthoredFX.Succeeded())
+	{
+		ExplosionFX = AuthoredFX.Object;
+	}
+}
+
+UNiagaraSystem* AExplosionEffect::ResolveExplosionSystem() const
+{
+	if (ExplosionFX)
+	{
+		return ExplosionFX;
+	}
+
+	// Walk down from the best match, so a partially imported pack still produces something
+	// rather than silently falling back to the debug sphere.
+	if (Radius >= LargeBlastThreshold)
+	{
+		if (ExplosionFXLarge)  { return ExplosionFXLarge; }
+		if (ExplosionFXMedium) { return ExplosionFXMedium; }
+		return ExplosionFXSmall;
+	}
+
+	if (Radius >= MediumBlastThreshold)
+	{
+		if (ExplosionFXMedium) { return ExplosionFXMedium; }
+		if (ExplosionFXLarge)  { return ExplosionFXLarge; }
+		return ExplosionFXSmall;
+	}
+
+	if (ExplosionFXSmall)  { return ExplosionFXSmall; }
+	if (ExplosionFXMedium) { return ExplosionFXMedium; }
+	return ExplosionFXLarge;
 }
 
 AExplosionEffect* AExplosionEffect::Spawn(UWorld* World, const FVector& Location, float InRadius, float Intensity)
@@ -68,11 +118,13 @@ void AExplosionEffect::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (ExplosionFX)
+	UNiagaraSystem* System = ResolveExplosionSystem();
+
+	if (System)
 	{
 		const float FXScale = bScaleFXToRadius ? FMath::Max(Radius / 100.f, 0.1f) : 1.f;
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-			GetWorld(), ExplosionFX, GetActorLocation(), FRotator::ZeroRotator,
+			GetWorld(), System, GetActorLocation(), FRotator::ZeroRotator,
 			FVector(FXScale), /*bAutoDestroy=*/true);
 	}
 
@@ -81,7 +133,9 @@ void AExplosionEffect::BeginPlay()
 		UGameplayStatics::PlaySoundAtLocation(GetWorld(), ExplosionSound, GetActorLocation());
 	}
 
-	if (bAlwaysUseLightFlash || !ExplosionFX)
+	// The light is kept alongside real VFX by default: a Niagara fireball emits no actual light,
+	// so without this the surroundings stay unlit through the brightest moment of the explosion.
+	if (bAlwaysUseLightFlash || !System)
 	{
 		FlashLight->SetIntensity(PeakLightIntensity);
 	}
@@ -89,7 +143,7 @@ void AExplosionEffect::BeginPlay()
 	BlastForce->FireImpulse();
 
 	// A Niagara system outlives the flash, so hang around long enough for it to finish.
-	SetLifeSpan(ExplosionFX ? FMath::Max(Duration, 4.f) : Duration + 0.1f);
+	SetLifeSpan(System ? FMath::Max(Duration, 6.f) : Duration + 0.1f);
 }
 
 void AExplosionEffect::Tick(float DeltaSeconds)
@@ -103,8 +157,8 @@ void AExplosionEffect::Tick(float DeltaSeconds)
 	FlashLight->SetIntensity(PeakLightIntensity * FMath::Pow(1.f - Alpha, 3.f));
 
 #if ENABLE_DRAW_DEBUG
-	// Stand-in for a fireball, suppressed as soon as real VFX is assigned.
-	if (ExplosionFX)
+	// Stand-in for a fireball, suppressed as soon as real VFX is available.
+	if (ResolveExplosionSystem())
 	{
 		return;
 	}

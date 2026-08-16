@@ -47,13 +47,43 @@ public:
 	// switches off automatically. Nothing else needs changing to move to real VFX.
 	// ---------------------------------------------------------------------------------------
 
-	/** Niagara system to play. When set, the debug-sphere fireball is suppressed. */
+	/**
+	 * Explicit override. When set, this plays regardless of blast size and the size-graded
+	 * systems below are ignored.
+	 */
 	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
 	TObjectPtr<class UNiagaraSystem> ExplosionFX;
 
-	/** Scales the Niagara system to the blast radius, assuming the system authors at 1 m. */
+	// Size-graded systems. A UAV popping and a fuel depot going up should not be the same
+	// effect played at different scales -- a real pack authors them separately, with different
+	// timing and smoke behaviour, and picking the right one reads far better than scaling one.
+
 	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
-	bool bScaleFXToRadius = true;
+	TObjectPtr<class UNiagaraSystem> ExplosionFXSmall;
+
+	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
+	TObjectPtr<class UNiagaraSystem> ExplosionFXMedium;
+
+	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
+	TObjectPtr<class UNiagaraSystem> ExplosionFXLarge;
+
+	/** Blast radius at or above which the medium system is used, in centimetres. */
+	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
+	float MediumBlastThreshold = 700.f;
+
+	/** Blast radius at or above which the large system is used. */
+	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
+	float LargeBlastThreshold = 1500.f;
+
+	/**
+	 * Scale the Niagara system to blast radius.
+	 *
+	 * Off by default now that systems are chosen by size. Authored packs already come at a
+	 * sensible real-world scale, and multiplying that by radius-in-metres produces explosions
+	 * several times larger than intended.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
+	bool bScaleFXToRadius = false;
 
 	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
 	TObjectPtr<USoundBase> ExplosionSound;
@@ -74,4 +104,7 @@ protected:
 
 private:
 	float Elapsed = 0.f;
+
+	/** The explicit override if set, otherwise the size-graded system matching Radius. */
+	class UNiagaraSystem* ResolveExplosionSystem() const;
 };
