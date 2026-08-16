@@ -44,17 +44,14 @@ AFPVDronePawn::AFPVDronePawn()
 	DroneMesh->SetAngularDamping(0.15f);
 	DroneMesh->SetMassOverrideInKg(NAME_None, 0.65f, true);
 
+	// Left deliberately empty. The kamikaze model belongs to the UAVs the operator hunts, not to
+	// the operator's own aircraft -- assign AirframeMesh only if a distinct player airframe is
+	// ever wanted. Empty means the placeholder box, which is what an FPV pilot effectively sees
+	// anyway: nothing.
 	AirframeVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("AirframeVisual"));
 	AirframeVisual->SetupAttachment(DroneMesh);
 	AirframeVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	AirframeVisual->SetVisibility(false);
-
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> KamikazeMesh(
-		TEXT("/Game/alstra_infinite/PolyPack-Starter/Kamikaze_Drones/Meshes/SM_KamikazeDroneV1.SM_KamikazeDroneV1"));
-	if (KamikazeMesh.Succeeded())
-	{
-		AirframeMesh = KamikazeMesh.Object;
-	}
 
 	FPVCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FPVCamera"));
 	FPVCamera->SetupAttachment(DroneMesh);
