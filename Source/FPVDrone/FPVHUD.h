@@ -39,6 +39,9 @@ private:
 	/** Connected-device picker. Toggle with fpv.ShowDevices; pick a slot with the number keys. */
 	void DrawDeviceMenu();
 
+	/** Step-by-step channel assignment prompts. Shown only while fpv.Calibrate is running. */
+	void DrawCalibrationWizard();
+
 	/** Number-key selection while the device menu is open. */
 	void HandleDeviceMenuInput();
 

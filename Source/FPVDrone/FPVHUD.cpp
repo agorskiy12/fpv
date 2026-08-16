@@ -2,6 +2,7 @@
 #include "FPVDrone.h"
 #include "FPVDronePawn.h"
 #include "FPVGameMode.h"
+#include "RCChannelMapping.h"
 #include "RCDeviceRegistry.h"
 #include "RaceGate.h"
 
@@ -45,6 +46,81 @@ namespace
 			UE_LOG(LogFPV, Log, TEXT("Device list refreshed: %d device(s), %d flyable."),
 				FRCDeviceRegistry::Get().GetDevices().Num(),
 				FRCDeviceRegistry::Get().GetGameDeviceIndices().Num());
+		}));
+
+	FAutoConsoleCommand CmdCalibrate(
+		TEXT("fpv.Calibrate"),
+		TEXT("Start the RC channel calibration wizard. Move each stick when prompted, press SPACE to confirm."),
+		FConsoleCommandDelegate::CreateStatic([]()
+		{
+			FRCChannelMapping::Get().BeginCalibration();
+		}));
+
+	FAutoConsoleCommand CmdCalibrateCancel(
+		TEXT("fpv.CalibrateCancel"),
+		TEXT("Abort the calibration wizard, leaving the existing mapping alone."),
+		FConsoleCommandDelegate::CreateStatic([]()
+		{
+			FRCChannelMapping::Get().CancelCalibration();
+		}));
+
+	FAutoConsoleCommand CmdTangoDefaults(
+		TEXT("fpv.Tango2Defaults"),
+		TEXT("Apply the stock TBS Tango 2 channel order: throttle 8, yaw 5, roll 7, pitch 6."),
+		FConsoleCommandDelegate::CreateStatic([]()
+		{
+			FRCChannelMapping::Get().ApplyTango2Defaults();
+			FRCChannelMapping::Get().SaveToConfig();
+		}));
+
+	FAutoConsoleCommand CmdSetChannel(
+		TEXT("fpv.SetChannel"),
+		TEXT("Assign a channel to an axis, e.g. 'fpv.SetChannel throttle 8'. Channels: throttle roll pitch yaw."),
+		FConsoleCommandWithArgsDelegate::CreateStatic([](const TArray<FString>& Args)
+		{
+			if (Args.Num() < 2)
+			{
+				UE_LOG(LogFPV, Warning, TEXT("Usage: fpv.SetChannel <throttle|roll|pitch|yaw> <axis>"));
+				return;
+			}
+
+			const FString Name = Args[0].ToLower();
+			ERCChannel Channel;
+			if (Name == TEXT("throttle"))   { Channel = ERCChannel::Throttle; }
+			else if (Name == TEXT("roll"))  { Channel = ERCChannel::Roll; }
+			else if (Name == TEXT("pitch")) { Channel = ERCChannel::Pitch; }
+			else if (Name == TEXT("yaw"))   { Channel = ERCChannel::Yaw; }
+			else
+			{
+				UE_LOG(LogFPV, Warning, TEXT("Unknown channel '%s'."), *Args[0]);
+				return;
+			}
+
+			FRCChannelMapping::Get().SetAxis(Channel, FCString::Atoi(*Args[1]) - 1);
+			FRCChannelMapping::Get().SaveToConfig();
+		}));
+
+	FAutoConsoleCommand CmdInvertChannel(
+		TEXT("fpv.InvertChannel"),
+		TEXT("Invert a channel, e.g. 'fpv.InvertChannel pitch 1'."),
+		FConsoleCommandWithArgsDelegate::CreateStatic([](const TArray<FString>& Args)
+		{
+			if (Args.Num() < 2)
+			{
+				UE_LOG(LogFPV, Warning, TEXT("Usage: fpv.InvertChannel <throttle|roll|pitch|yaw> <0|1>"));
+				return;
+			}
+
+			const FString Name = Args[0].ToLower();
+			ERCChannel Channel;
+			if (Name == TEXT("throttle"))   { Channel = ERCChannel::Throttle; }
+			else if (Name == TEXT("roll"))  { Channel = ERCChannel::Roll; }
+			else if (Name == TEXT("pitch")) { Channel = ERCChannel::Pitch; }
+			else if (Name == TEXT("yaw"))   { Channel = ERCChannel::Yaw; }
+			else { return; }
+
+			FRCChannelMapping::Get().SetInverted(Channel, FCString::Atoi(*Args[1]) != 0);
+			FRCChannelMapping::Get().SaveToConfig();
 		}));
 
 	FAutoConsoleCommand CmdReRegisterDevice(
@@ -102,6 +178,13 @@ void AFPVHUD::DrawHUD()
 	{
 		HandleDeviceMenuInput();
 		DrawDeviceMenu();
+	}
+
+	FRCChannelMapping& Mapping = FRCChannelMapping::Get();
+	if (Mapping.IsCalibrating())
+	{
+		Mapping.TickCalibration(GetOwningPlayerController());
+		DrawCalibrationWizard();
 	}
 
 	if (CVarShowChannels.GetValueOnGameThread() != 0)
@@ -358,6 +441,43 @@ void AFPVHUD::DrawChannelMonitor()
 	DrawText(ButtonLine, TextColor, PanelX + 10.f, RowY + 6.f, Font, 1.f);
 }
 
+void AFPVHUD::DrawCalibrationWizard()
+{
+	UFont* Font = GEngine->GetMediumFont();
+	const FRCChannelMapping& Mapping = FRCChannelMapping::Get();
+
+	constexpr float PanelW = 640.f;
+	constexpr float PanelH = 150.f;
+	const float PanelX = (Canvas->SizeX - PanelW) * 0.5f;
+	const float PanelY = Canvas->SizeY * 0.34f;
+
+	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.88f), PanelX, PanelY, PanelW, PanelH);
+
+	DrawText(TEXT("RC CALIBRATION"), AccentColor, PanelX + 16.f, PanelY + 12.f, Font, 1.f);
+	DrawText(Mapping.GetCalibrationPrompt(), TextColor, PanelX + 16.f, PanelY + 44.f, Font, 1.f);
+
+	// Live feedback on which axis is currently winning, so a wrong stick is obvious immediately.
+	const int32 Candidate = Mapping.GetCandidateAxis();
+	const float Travel = Mapping.GetCandidateTravel();
+
+	if (Candidate != INDEX_NONE && Travel > 0.02f)
+	{
+		const bool bEnough = Travel >= 0.25f;
+		DrawText(FString::Printf(TEXT("detecting AXIS %d   travel %.2f   %s"),
+				Candidate + 1, Travel, bEnough ? TEXT("- ready") : TEXT("- move it further")),
+			bEnough ? AccentColor : FLinearColor(1.f, 0.75f, 0.2f, 1.f),
+			PanelX + 16.f, PanelY + 76.f, Font, 1.f);
+	}
+	else
+	{
+		DrawText(TEXT("waiting for stick movement..."),
+			FLinearColor(1.f, 1.f, 1.f, 0.5f), PanelX + 16.f, PanelY + 76.f, Font, 1.f);
+	}
+
+	DrawText(TEXT("fpv.CalibrateCancel to abort"),
+		FLinearColor(1.f, 1.f, 1.f, 0.4f), PanelX + 16.f, PanelY + 112.f, GEngine->GetSmallFont(), 1.f);
+}
+
 // ---------------------------------------------------------------------------------------------
 // Device picker
 // ---------------------------------------------------------------------------------------------
@@ -373,7 +493,16 @@ void AFPVHUD::EnsureDeviceRegistryInitialised()
 	FRCDeviceRegistry& Registry = FRCDeviceRegistry::Get();
 	Registry.Refresh();
 
+	// Saved mapping wins; otherwise seed a recognised radio with its known channel order so it
+	// is flyable immediately, with the wizard available to refine the endpoints.
+	FRCChannelMapping& Mapping = FRCChannelMapping::Get();
+	Mapping.LoadFromConfig();
+
 	const FRCInputDeviceInfo* Selected = Registry.GetSelectedDevice();
+	if (!Mapping.IsConfigured() && Selected && Selected->IsKnownRadio())
+	{
+		Mapping.ApplyTango2Defaults();
+	}
 	UE_LOG(LogFPV, Log, TEXT("Input devices: %d total, %d flyable. Selected: %s (%s)"),
 		Registry.GetDevices().Num(),
 		Registry.GetGameDeviceIndices().Num(),

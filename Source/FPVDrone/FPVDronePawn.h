@@ -140,6 +140,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Sticks")
 	bool bReleaseMouseCursor = true;
 
+	/**
+	 * Take stick input from a calibrated RC transmitter when one is connected, falling back to
+	 * keyboard and gamepad otherwise.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Sticks")
+	bool bUseRCTransmitter = true;
+
+	/** True while the flight model is being driven by the transmitter rather than the keyboard. */
+	UFUNCTION(BlueprintPure, Category = "Drone|Telemetry")
+	bool IsUsingRCTransmitter() const { return bRCInputActive; }
+
 	// ---------------------------------------------------------------------------------------
 	// Axis sign correction
 	// ---------------------------------------------------------------------------------------
@@ -213,6 +224,11 @@ private:
 	FVector PreviousRateError = FVector::ZeroVector;
 
 	FTransform SpawnTransform;
+
+	bool bRCInputActive = false;
+
+	/** Overwrite the stick values from the calibrated transmitter, when one is available. */
+	void ApplyRCTransmitterInput();
 
 	/** Betaflight's applyActualRates: stick position -> commanded rate in deg/s. */
 	static float ApplyActualRates(float Stick, float Center, float Max, float Expo);

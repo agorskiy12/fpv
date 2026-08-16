@@ -1,5 +1,7 @@
 #include "FPVDronePawn.h"
 #include "FPVDrone.h"
+#include "RCChannelMapping.h"
+#include "RCDeviceRegistry.h"
 
 #include "Camera/CameraComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -230,12 +232,42 @@ void AFPVDronePawn::Tick(float DeltaSeconds)
 	UpdateFlight(DeltaSeconds);
 }
 
+void AFPVDronePawn::ApplyRCTransmitterInput()
+{
+	bRCInputActive = false;
+
+	if (!bUseRCTransmitter)
+	{
+		return;
+	}
+
+	const FRCChannelMapping& Mapping = FRCChannelMapping::Get();
+	if (!Mapping.IsConfigured() || !FRCDeviceRegistry::Get().HasParsedReport())
+	{
+		return;   // no radio: keyboard and gamepad continue to work untouched
+	}
+
+	bRCInputActive = true;
+
+	StickRoll = Mapping.GetChannelValue(ERCChannel::Roll);
+	StickYaw = Mapping.GetChannelValue(ERCChannel::Yaw);
+
+	const float PitchValue = Mapping.GetChannelValue(ERCChannel::Pitch);
+	StickPitch = bInvertPitchStick ? -PitchValue : PitchValue;
+
+	// The rest of the flight model expects a -1..1 throttle stick, which it re-centres to
+	// 0..1. The transmitter channel is already 0..1, so convert back rather than special-case it.
+	RawThrottle = Mapping.GetChannelValue(ERCChannel::Throttle) * 2.f - 1.f;
+}
+
 void AFPVDronePawn::UpdateFlight(float DeltaSeconds)
 {
 	if (DeltaSeconds <= KINDA_SMALL_NUMBER || !DroneMesh || !DroneMesh->IsSimulatingPhysics())
 	{
 		return;
 	}
+
+	ApplyRCTransmitterInput();
 
 	const FTransform BodyTransform = GetActorTransform();
 
