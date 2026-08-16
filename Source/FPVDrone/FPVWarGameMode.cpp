@@ -8,6 +8,9 @@
 #include "StrikeCamera.h"
 #include "VehicleTarget.h"
 
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
@@ -32,6 +35,80 @@ namespace
 		const APawn* Player = UGameplayStatics::GetPlayerPawn(World, 0);
 		const FVector Origin = Player ? FVector(Player->GetActorLocation().X, Player->GetActorLocation().Y, 0.f)
 									  : FVector::ZeroVector;
+
+		// --- Runway ---------------------------------------------------------------------------
+		// Placed first, and everything else is laid out relative to it. The route is derived
+		// from the mesh's measured bounds rather than hard-coded, so the layout holds whatever
+		// size the asset turns out to be.
+		float RunwayLength = 12000.f;
+		float RunwayWidth = 3000.f;
+		float RunwayDeckZ = 0.f;
+		bool bRunwayAlongX = true;
+
+		// Normalised to a playable length rather than trusted. The Fab runway measures 79 km
+		// nose to tail as authored; at 130 km/h that is a thirty-five minute transit, and its
+		// 846 m deck height put the vehicles in low orbit. 600 m gives a drone crossing of about
+		// seventeen seconds and a vehicle lap of well under a minute.
+		constexpr float TargetRunwayLength = 60000.f;
+
+		// The runway is solid, and the drone must never start inside it. Offsetting the whole
+		// scene puts the deck a comfortable flight away rather than under the launch point --
+		// spawning inside collision looks like the game is broken, because the physics solver
+		// spends every frame trying to push you out and you cannot move at all.
+		const FVector RunwayCentre = Origin + FVector(45000.f, 0.f, 0.f);
+
+		if (UStaticMesh* RunwayMesh = LoadObject<UStaticMesh>(nullptr,
+			TEXT("/Game/Fab/Dubai_Skydive_Runway/bahn/StaticMeshes/bahn.bahn")))
+		{
+			const FBox MeshBounds = RunwayMesh->GetBoundingBox();
+			const FVector RawSize = MeshBounds.GetSize();
+
+			const float LongestAxis = FMath::Max(RawSize.X, RawSize.Y);
+			const float RunwayScale = (LongestAxis > KINDA_SMALL_NUMBER)
+				? TargetRunwayLength / LongestAxis
+				: 1.f;
+
+			const FVector MeshSize = RawSize * RunwayScale;
+
+			// Sit the scaled base on the ground plane, wherever the pivot happens to be.
+			const FVector SpawnLocation = RunwayCentre - FVector(0.f, 0.f, MeshBounds.Min.Z * RunwayScale);
+
+			FActorSpawnParameters RunwayParams;
+			RunwayParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+			if (AStaticMeshActor* Runway = World->SpawnActor<AStaticMeshActor>(
+				AStaticMeshActor::StaticClass(), SpawnLocation, FRotator::ZeroRotator, RunwayParams))
+			{
+				UStaticMeshComponent* RunwayComponent = Runway->GetStaticMeshComponent();
+				RunwayComponent->SetMobility(EComponentMobility::Movable);   // required when spawned at runtime
+				RunwayComponent->SetStaticMesh(RunwayMesh);
+				RunwayComponent->SetWorldScale3D(FVector(RunwayScale));
+				RunwayComponent->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+
+				bRunwayAlongX = MeshSize.X >= MeshSize.Y;
+				RunwayLength = bRunwayAlongX ? MeshSize.X : MeshSize.Y;
+				RunwayWidth = bRunwayAlongX ? MeshSize.Y : MeshSize.X;
+
+				// Vehicles drive on the top surface, which for a deck is the upper bound.
+				RunwayDeckZ = MeshSize.Z;
+
+				UE_LOG(LogFPV, Log,
+					TEXT("Runway at %s -- scaled %.4f to %.0f x %.0f x %.0f cm, long axis %s, deck Z=%.0f"),
+					*SpawnLocation.ToCompactString(), RunwayScale,
+					MeshSize.X, MeshSize.Y, MeshSize.Z,
+					bRunwayAlongX ? TEXT("X") : TEXT("Y"), RunwayDeckZ);
+			}
+		}
+		else
+		{
+			UE_LOG(LogFPV, Warning, TEXT("Runway mesh not found -- vehicles will use a default route."));
+		}
+
+		// Along the runway, centred, leaving a margin at each end so they turn on the deck.
+		const FVector RunwayAxis = bRunwayAlongX ? FVector(1.f, 0.f, 0.f) : FVector(0.f, 1.f, 0.f);
+		const FVector RunwayCross = bRunwayAlongX ? FVector(0.f, 1.f, 0.f) : FVector(1.f, 0.f, 0.f);
+		const float HalfRun = RunwayLength * 0.42f;
+		const float LaneOffset = FMath::Min(RunwayWidth * 0.18f, 600.f);
 
 		auto SpawnTarget = [World](TSubclassOf<ADroneTarget> Class, const FVector& Location,
 			const FRotator& Rotation, TFunctionRef<void(ADroneTarget*)> Configure) -> ADroneTarget*
@@ -76,27 +153,43 @@ namespace
 		SpawnTarget(ADroneTarget::StaticClass(), Origin + FVector(6800.f, 6200.f, 0.f), FRotator::ZeroRotator,
 			[](ADroneTarget* T) { T->Kind = ETargetKind::ElectricalStation; T->BodySize = FVector(800.f, 800.f, 600.f); T->MaxHealth = 110.f; T->ScoreValue = 350; });
 
-		// A long straight run for the car, so the chase has room.
-		SpawnTarget(AVehicleTarget::StaticClass(), Origin + FVector(-3000.f, 6000.f, 0.f), FRotator::ZeroRotator,
-			[](ADroneTarget* T)
-			{
-				if (AVehicleTarget* V = Cast<AVehicleTarget>(T))
-				{
-					V->RoutePoints = { FVector::ZeroVector, FVector(14000.f, 0.f, 0.f), FVector(14000.f, 5000.f, 0.f), FVector(0.f, 5000.f, 0.f) };
-					V->Speed = 1500.f;
-				}
-			});
+		// Vehicles run the length of the runway in opposing lanes. Having one coming towards you
+		// and one going away matters: a head-on pass and a stern chase are completely different
+		// problems, and the runway should always be offering both.
+		const float RunwayYaw = bRunwayAlongX ? 0.f : 90.f;
 
-		SpawnTarget(AVehicleTarget::StaticClass(), Origin + FVector(2000.f, -6500.f, 0.f), FRotator(0.f, 180.f, 0.f),
-			[](ADroneTarget* T)
-			{
-				if (AVehicleTarget* V = Cast<AVehicleTarget>(T))
+		struct FRunwayVehicle { float Lane; float Speed; bool bReversed; bool bPrimary; };
+		static const FRunwayVehicle RunwayVehicles[] = {
+			{  1.f, 1500.f, false, true  },
+			{ -1.f, 1900.f, true,  false },
+			{  0.f, 1250.f, false, false },
+		};
+
+		for (const FRunwayVehicle& Spec : RunwayVehicles)
+		{
+			const FVector Lane = RunwayCross * (LaneOffset * Spec.Lane);
+			const FVector StartAlong = RunwayAxis * (Spec.bReversed ? HalfRun : -HalfRun);
+			const FVector Start = RunwayCentre + StartAlong + Lane + FVector(0.f, 0.f, RunwayDeckZ);
+
+			// Route points are actor-local, so this is a straight there-and-back along the deck.
+			const float RunDistance = HalfRun * 2.f;
+			const FVector Far = FVector(RunDistance, 0.f, 0.f);
+
+			SpawnTarget(AVehicleTarget::StaticClass(), Start,
+				FRotator(0.f, RunwayYaw + (Spec.bReversed ? 180.f : 0.f), 0.f),
+				[&Spec, Far](ADroneTarget* T)
 				{
-					V->RoutePoints = { FVector::ZeroVector, FVector(10000.f, 0.f, 0.f) };
-					V->Speed = 1900.f;
-					V->bPrimaryObjective = false;   // secondary: score only
-				}
-			});
+					if (AVehicleTarget* V = Cast<AVehicleTarget>(T))
+					{
+						V->RoutePoints = { FVector::ZeroVector, Far };
+						V->Speed = Spec.Speed;
+						V->bPrimaryObjective = Spec.bPrimary;
+						V->bLoopRoute = true;
+						// Wide turns at the ends, so they sweep round instead of pivoting on the spot.
+						V->TurnRateDegrees = 55.f;
+					}
+				});
+		}
 
 		// A flight of loitering munitions, spread across heights and speeds so the sky is never
 		// empty and there is always something to climb after.
@@ -122,10 +215,21 @@ namespace
 				});
 		}
 
-		// The transport heli, high and well clear. Kept far out deliberately: it is large, and
-		// spawning anything large near the player start risks the drone starting inside it.
-		SpawnTarget(AHelicopterTarget::StaticClass(), Origin + FVector(-20000.f, -20000.f, 9000.f), FRotator(0.f, 45.f, 0.f),
-			[](ADroneTarget* T) {});
+		// The transport heli orbits the runway, so the scene has a centre instead of a target
+		// scattered off in empty ground. Spawned well clear of the player start -- it is large,
+		// and starting inside it would be indistinguishable from a broken game.
+		SpawnTarget(AHelicopterTarget::StaticClass(), RunwayCentre + FVector(0.f, 0.f, 6000.f), FRotator(0.f, 45.f, 0.f),
+			[RunwayLength](ADroneTarget* T)
+			{
+				if (AHelicopterTarget* H = Cast<AHelicopterTarget>(T))
+				{
+					H->bOrbit = true;
+					// Wide enough to clear the runway, so it crosses the deck rather than
+					// circling one end of it.
+					H->OrbitRadius = FMath::Max(RunwayLength * 0.6f, 12000.f);
+					H->OrbitAltitude = 5500.f;
+				}
+			});
 
 		UE_LOG(LogFPV, Log, TEXT("Spawned test targets around %s"), *Origin.ToCompactString());
 	}
