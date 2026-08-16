@@ -100,6 +100,12 @@ I cannot author Niagara systems — they are binary editor assets. This phase is
 
 ## Phase 4 — Chaos fracture, hero targets only
 
+**Optional.** The goal is targets that visibly come apart, and Phase 2 already delivers that.
+This phase buys one specific thing: pieces that match the shape of the thing that broke, rather
+than generic rubble. Worth it for a helicopter, hard to justify for a shed.
+
+Skip it unless the generic debris looks obviously wrong once it is in.
+
 **You fracture the meshes; I write the runtime code.**
 
 This is real shattering: the actual mesh breaking along real fracture lines.
@@ -147,7 +153,7 @@ Same treatment for vehicles at lower stakes — roll, flip, come to rest.
 2. **Phase 2** — debris burst. Delivers the actual request across all targets.
 3. **Phase 5** — falling wrecks. Cheap, and transforms the highest-value target.
 4. **Phase 3** — fireball, once you have been through Fab.
-5. **Phase 4** — Chaos fracture, last, on two or three hero meshes only.
+5. **Phase 4** — Chaos fracture. Optional, last, and only if generic debris looks wrong.
 
 Phases 1, 2 and 5 are all code and can be done back to back without you touching the editor.
 Phase 3 is blocked on asset acquisition. Phase 4 needs per-mesh editor work from you.
