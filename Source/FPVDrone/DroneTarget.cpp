@@ -112,7 +112,22 @@ void ADroneTarget::RebuildBody()
 		OverrideMesh->SetStaticMesh(BodyMesh);
 		OverrideMesh->SetRelativeLocation(MeshOffset);
 		OverrideMesh->SetRelativeRotation(MeshRotation);
-		OverrideMesh->SetRelativeScale3D(MeshScale);
+
+		FVector AppliedScale = MeshScale;
+		if (bAutoScaleMeshToBodySize)
+		{
+			// Match the mesh's longest axis to the longest axis of the gameplay footprint.
+			// Uniform, so the model is never stretched -- only resized.
+			const FVector MeshSize = BodyMesh->GetBoundingBox().GetSize();
+			const float LongestMesh = MeshSize.GetMax();
+			const float LongestBody = BodySize.GetMax();
+
+			if (LongestMesh > KINDA_SMALL_NUMBER && LongestBody > KINDA_SMALL_NUMBER)
+			{
+				AppliedScale = FVector(LongestBody / LongestMesh);
+			}
+		}
+		OverrideMesh->SetRelativeScale3D(AppliedScale);
 		OverrideMesh->SetVisibility(true);
 		OverrideMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
 

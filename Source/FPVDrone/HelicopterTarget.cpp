@@ -61,13 +61,62 @@ void AHelicopterTarget::BeginPlay()
 		const FVector Initial = (WorldRoute[CurrentPoint] - GetActorLocation()).GetSafeNormal();
 		Velocity = Initial * CruiseSpeed;
 	}
+
+	// The circle is centred on wherever the actor was placed, so dragging it in the editor moves
+	// the whole orbit rather than just the starting point.
+	OrbitCentre = GetActorLocation() + OrbitCentreOffset;
+	OrbitAngle = 0.f;
+
+	UE_LOG(LogFPV, Log, TEXT("Helicopter: %s, centre %s, radius %.0f m, altitude %.0f m"),
+		bOrbit ? TEXT("orbiting") : TEXT("on route"),
+		*OrbitCentre.ToCompactString(), OrbitRadius / 100.f, OrbitAltitude / 100.f);
+}
+
+void AHelicopterTarget::TickOrbit(float DeltaSeconds)
+{
+	// Constant ground speed converted to angular rate, so changing the radius changes how long
+	// a lap takes rather than how fast the aircraft appears to fly.
+	const float Speed = bFleeing ? RunSpeed : CruiseSpeed;
+	const float Radius = FMath::Max(OrbitRadius, 100.f);
+	const float AngularRate = (Speed / Radius) * (bOrbitClockwise ? 1.f : -1.f);
+
+	OrbitAngle += AngularRate * DeltaSeconds;
+
+	// Being hunted pushes it wider and higher rather than making it dodge.
+	const float EffectiveRadius = Radius * (bFleeing ? 1.15f : 1.f);
+	float EffectiveAltitude = OrbitAltitude;
+	if (bFleeing)
+	{
+		EffectiveAltitude += FleeClimbRate * DeltaSeconds;
+		OrbitAltitude = EffectiveAltitude;   // the climb persists; it does not sink back down
+	}
+
+	const FVector Position = OrbitCentre + FVector(
+		FMath::Cos(OrbitAngle) * EffectiveRadius,
+		FMath::Sin(OrbitAngle) * EffectiveRadius,
+		EffectiveAltitude + FMath::Sin(BobPhase) * BobAmplitude);
+
+	const FVector Previous = GetActorLocation();
+	SetActorLocation(Position, false);
+	Velocity = (Position - Previous) / FMath::Max(DeltaSeconds, KINDA_SMALL_NUMBER);
+
+	// Tangent to the circle, with a fixed bank into it -- a steady turn holds a steady angle.
+	const FVector Tangent = FVector(
+		-FMath::Sin(OrbitAngle) * (bOrbitClockwise ? 1.f : -1.f),
+		 FMath::Cos(OrbitAngle) * (bOrbitClockwise ? 1.f : -1.f),
+		 0.f).GetSafeNormal();
+
+	const float TargetBank = MaxBankDegrees * (bOrbitClockwise ? 1.f : -1.f);
+	CurrentBank = FMath::FInterpTo(CurrentBank, TargetBank, DeltaSeconds, 1.5f);
+
+	SetActorRotation(FRotator(CruisePitchDegrees, Tangent.Rotation().Yaw, CurrentBank));
 }
 
 void AHelicopterTarget::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	if (IsDestroyed() || DeltaSeconds <= KINDA_SMALL_NUMBER || WorldRoute.Num() == 0)
+	if (IsDestroyed() || DeltaSeconds <= KINDA_SMALL_NUMBER)
 	{
 		return;
 	}
@@ -75,14 +124,38 @@ void AHelicopterTarget::Tick(float DeltaSeconds)
 	BobPhase += DeltaSeconds * BobFrequency;
 	RotorSpin += DeltaSeconds * 1800.f;
 
-	const FVector Location = GetActorLocation();
-
-	// Threat assessment
+	// Threat assessment, shared by both flight modes.
 	bFleeing = false;
 	if (const APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
 	{
-		bFleeing = FVector::DistSquared(Player->GetActorLocation(), Location) < FMath::Square(DetectionRadius);
+		bFleeing = FVector::DistSquared(Player->GetActorLocation(), GetActorLocation()) < FMath::Square(DetectionRadius);
 	}
+
+	if (bOrbit)
+	{
+		TickOrbit(DeltaSeconds);
+	}
+	else
+	{
+		TickRoute(DeltaSeconds);
+	}
+
+	// Spin the placeholder rotor disc. With a real airframe mesh there is nothing separate to
+	// turn, so this is skipped.
+	if (!IsUsingMeshOverride() && BodyParts.IsValidIndex(3) && BodyParts[3])
+	{
+		BodyParts[3]->SetRelativeRotation(FRotator(0.f, RotorSpin, 0.f));
+	}
+}
+
+void AHelicopterTarget::TickRoute(float DeltaSeconds)
+{
+	if (WorldRoute.Num() == 0)
+	{
+		return;
+	}
+
+	const FVector Location = GetActorLocation();
 
 	// Advance the circuit
 	if (WorldRoute.Num() > 1 && FVector::DistSquared(WorldRoute[CurrentPoint], Location) < FMath::Square(WaypointTolerance))
@@ -124,13 +197,6 @@ void AHelicopterTarget::Tick(float DeltaSeconds)
 
 	const FRotator Facing = Forward.Rotation();
 	SetActorRotation(FRotator(CruisePitchDegrees + Facing.Pitch * 0.3f, Facing.Yaw, CurrentBank));
-
-	// Spin the placeholder rotor disc. With a real airframe mesh there is nothing separate to
-	// turn, so this is skipped.
-	if (!IsUsingMeshOverride() && BodyParts.IsValidIndex(3) && BodyParts[3])
-	{
-		BodyParts[3]->SetRelativeRotation(FRotator(0.f, RotorSpin, 0.f));
-	}
 }
 
 void AHelicopterTarget::OnDestroyed_Internal(AActor* Killer)

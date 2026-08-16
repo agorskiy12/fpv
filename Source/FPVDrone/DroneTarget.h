@@ -102,6 +102,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Visuals")
 	FVector MeshScale = FVector(1.f, 1.f, 1.f);
 
+	/**
+	 * Rescale the mesh so its longest axis matches BodySize, ignoring MeshScale.
+	 *
+	 * Imported meshes arrive at whatever scale they were authored at, and the difference between
+	 * metres and centimetres is a factor of a hundred. A helicopter that should be 18 m across
+	 * turning up 1.8 km across does not look like a scaling bug from the inside -- it looks like
+	 * the game is broken, because you are standing in the middle of it and it fills every
+	 * direction.
+	 *
+	 * On by default because a mesh at the size gameplay expects is almost always what you want.
+	 * Turn it off when the asset is already correctly scaled and you want exact control.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Visuals")
+	bool bAutoScaleMeshToBodySize = true;
+
 	/** Optional material override applied to every slot of the mesh. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Visuals")
 	TObjectPtr<UMaterialInterface> BodyMaterial;

@@ -25,7 +25,34 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
-	/** Patrol circuit in actor-local space, flown in order and looped. */
+	/**
+	 * Circle the scene instead of following waypoints.
+	 *
+	 * An orbit is far more legible than a route: it is always in view, always crossing, and
+	 * always coming back around, so a missed pass costs a few seconds rather than the target
+	 * disappearing over the horizon. It is also trivially predictable, which is what makes
+	 * leading it a skill rather than a guess.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helicopter|Orbit")
+	bool bOrbit = true;
+
+	/** Orbit radius in centimetres. 20000 is a 200 m circle. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helicopter|Orbit")
+	float OrbitRadius = 20000.f;
+
+	/** Height above the spawn point that the circle is flown at. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helicopter|Orbit")
+	float OrbitAltitude = 5000.f;
+
+	/** Offset of the circle's centre from the spawn point. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helicopter|Orbit")
+	FVector OrbitCentreOffset = FVector::ZeroVector;
+
+	/** Anticlockwise when false. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helicopter|Orbit")
+	bool bOrbitClockwise = true;
+
+	/** Patrol circuit in actor-local space. Used only when bOrbit is false. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helicopter")
 	TArray<FVector> RoutePoints;
 
@@ -74,6 +101,12 @@ private:
 	FVector Velocity = FVector::ZeroVector;
 	float BobPhase = 0.f;
 	float CurrentBank = 0.f;
+
+	FVector OrbitCentre = FVector::ZeroVector;
+	float OrbitAngle = 0.f;
+
+	void TickOrbit(float DeltaSeconds);
+	void TickRoute(float DeltaSeconds);
 
 	/** Spin rate for the rotor disc, if the placeholder body is in use. */
 	float RotorSpin = 0.f;
