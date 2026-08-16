@@ -29,9 +29,16 @@ public:
 private:
 	void DrawThrottleBar(float Throttle);
 	void DrawTelemetry(float SpeedKPH, float AltitudeM);
-	void DrawRaceInfo();
-	void DrawGateMarker();
 	void DrawCrosshair();
+
+	/** Score, drones remaining, objectives left, mission banners. */
+	void DrawMissionStatus();
+
+	/** Brackets over live targets, with range and a blast-range cue. */
+	void DrawTargetMarkers();
+
+	/** Warhead state and the detonate prompt. */
+	void DrawWarheadStatus(const class AFPVDronePawn* Drone);
 
 	/** Debug overlay for bringing up an RC transmitter. Toggle with the fpv.ShowChannels console variable. */
 	void DrawChannelMonitor();

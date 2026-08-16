@@ -192,6 +192,47 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Drone")
 	void ResetToStart();
 
+	// ---------------------------------------------------------------------------------------
+	// Warhead
+	//
+	// The drone is the munition. It detonates on a hard enough impact, or on command for an
+	// airburst -- which is the tactic that makes a moving target catchable: you do not have to
+	// physically connect, you only have to get close enough.
+	// ---------------------------------------------------------------------------------------
+
+	/** Blast radius in centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Warhead")
+	float BlastRadius = 1000.f;
+
+	/** Damage at the centre of the blast, falling off linearly to zero at BlastRadius. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Warhead")
+	float BlastDamage = 220.f;
+
+	/**
+	 * Impact speed needed to set the warhead off, cm/s.
+	 * Below this you have merely bumped into something and can keep flying.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Warhead")
+	float ArmingImpactSpeed = 450.f;
+
+	/** Warheads do not arm on the launch rail. Cleared once the drone is clear of the ground. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Warhead")
+	float ArmingAltitude = 150.f;
+
+	UFUNCTION(BlueprintPure, Category = "Drone|Warhead")
+	bool IsWarheadArmed() const { return bWarheadArmed && !bWarheadSpent; }
+
+	UFUNCTION(BlueprintPure, Category = "Drone|Warhead")
+	bool IsWarheadSpent() const { return bWarheadSpent; }
+
+	/** Blow the warhead where the drone currently is. */
+	UFUNCTION(BlueprintCallable, Category = "Drone|Warhead")
+	void Detonate();
+
+	/** Restore a live warhead. Called when a fresh drone is issued. */
+	UFUNCTION(BlueprintCallable, Category = "Drone|Warhead")
+	void RearmWarhead();
+
 protected:
 	// Input actions and mappings are built in C++ at runtime, so the project needs no
 	// Input Action assets and no Blueprint wiring to be playable.
@@ -200,6 +241,7 @@ protected:
 	UPROPERTY(Transient) TObjectPtr<UInputAction> PitchAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> YawAction;
 	UPROPERTY(Transient) TObjectPtr<UInputAction> ResetAction;
+	UPROPERTY(Transient) TObjectPtr<UInputAction> DetonateAction;
 	UPROPERTY(Transient) TObjectPtr<UInputMappingContext> InputMapping;
 
 	void BuildInputAssets();
@@ -210,6 +252,15 @@ protected:
 	void OnPitch(const FInputActionValue& Value);
 	void OnYaw(const FInputActionValue& Value);
 	void OnReset(const FInputActionValue& Value);
+	void OnDetonate(const FInputActionValue& Value);
+
+	UFUNCTION()
+	void OnDroneHit(
+		UPrimitiveComponent* HitComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		FVector NormalImpulse,
+		const FHitResult& Hit);
 
 private:
 	/** Raw stick positions, -1..1. Throttle is stored separately as 0..1. */
@@ -226,6 +277,9 @@ private:
 	FTransform SpawnTransform;
 
 	bool bRCInputActive = false;
+
+	bool bWarheadArmed = false;
+	bool bWarheadSpent = false;
 
 	/** Overwrite the stick values from the calibrated transmitter, when one is available. */
 	void ApplyRCTransmitterInput();

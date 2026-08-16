@@ -1,10 +1,10 @@
 #include "FPVHUD.h"
+#include "DroneTarget.h"
 #include "FPVDrone.h"
 #include "FPVDronePawn.h"
-#include "FPVGameMode.h"
+#include "FPVWarGameMode.h"
 #include "RCChannelMapping.h"
 #include "RCDeviceRegistry.h"
-#include "RaceGate.h"
 
 #include "Engine/Canvas.h"
 #include "Engine/Engine.h"
@@ -201,8 +201,9 @@ void AFPVHUD::DrawHUD()
 	DrawCrosshair();
 	DrawThrottleBar(Drone->GetThrottle());
 	DrawTelemetry(Drone->GetSpeedKPH(), Drone->GetAltitudeMeters());
-	DrawRaceInfo();
-	DrawGateMarker();
+	DrawTargetMarkers();
+	DrawWarheadStatus(Drone);
+	DrawMissionStatus();
 }
 
 void AFPVHUD::DrawCrosshair()
@@ -250,83 +251,175 @@ void AFPVHUD::DrawTelemetry(float SpeedKPH, float AltitudeM)
 		TextColor, X, Y + 26.f, GEngine->GetMediumFont(), 1.f);
 }
 
-void AFPVHUD::DrawRaceInfo()
+void AFPVHUD::DrawMissionStatus()
 {
-	const AFPVGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AFPVGameMode>() : nullptr;
-	if (!GameMode || GameMode->GetTotalGates() == 0)
-	{
-		return;
-	}
-
-	const float X = Canvas->SizeX - 240.f;
-	float Y = 40.f;
-
-	auto Line = [this, X, &Y](const FString& Text, const FLinearColor& Color)
-	{
-		DrawText(Text, Color, X, Y, GEngine->GetMediumFont(), 1.f);
-		Y += 26.f;
-	};
-
-	if (!GameMode->IsRaceStarted())
-	{
-		Line(TEXT("FLY THROUGH GATE 1 TO START"), AccentColor);
-	}
-	else
-	{
-		Line(FString::Printf(TEXT("LAP    %s"), *AFPVGameMode::FormatLapTime(GameMode->GetCurrentLapTime())), TextColor);
-		Line(FString::Printf(TEXT("BEST   %s"), *AFPVGameMode::FormatLapTime(GameMode->GetBestLapTime())), AccentColor);
-		Line(FString::Printf(TEXT("LAPS   %d"), GameMode->GetCompletedLaps()), TextColor);
-	}
-
-	Line(FString::Printf(TEXT("GATE   %d / %d"),
-		GameMode->GetNextGateNumber(), GameMode->GetTotalGates()), TextColor);
-}
-
-void AFPVHUD::DrawGateMarker()
-{
-	const AFPVGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AFPVGameMode>() : nullptr;
+	const AFPVWarGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AFPVWarGameMode>() : nullptr;
 	if (!GameMode)
 	{
 		return;
 	}
 
-	const ARaceGate* NextGate = GameMode->GetNextGate();
-	const APawn* Drone = GetOwningPawn();
-	if (!NextGate || !Drone)
+	UFont* Font = GEngine->GetMediumFont();
+	const float X = Canvas->SizeX - 260.f;
+	float Y = 40.f;
+
+	auto Line = [this, X, &Y, Font](const FString& Text, const FLinearColor& Color)
 	{
-		return;
-	}
-
-	const FVector GateCenter = NextGate->GetGateCenter();
-	const FVector Projected = Project(GateCenter);
-
-	// Project returns Z <= 0 when the point is behind the camera.
-	if (Projected.Z <= 0.f)
-	{
-		return;
-	}
-
-	const float DistanceM = FVector::Dist(Drone->GetActorLocation(), GateCenter) / 100.f;
-
-	// Bracket shrinks as you close on the gate.
-	const float Size = FMath::Clamp(4000.f / FMath::Max(DistanceM, 1.f), 14.f, 90.f);
-	const float X = Projected.X;
-	const float Y = Projected.Y;
-	const float Arm = Size * 0.35f;
-
-	auto Corner = [this](float CX, float CY, float DX, float DY, float Length)
-	{
-		DrawLine(CX, CY, CX + DX * Length, CY, AccentColor, 2.f);
-		DrawLine(CX, CY, CX, CY + DY * Length, AccentColor, 2.f);
+		DrawText(Text, Color, X, Y, Font, 1.f);
+		Y += 26.f;
 	};
 
-	Corner(X - Size, Y - Size,  1.f,  1.f, Arm);
-	Corner(X + Size, Y - Size, -1.f,  1.f, Arm);
-	Corner(X - Size, Y + Size,  1.f, -1.f, Arm);
-	Corner(X + Size, Y + Size, -1.f, -1.f, Arm);
+	Line(FString::Printf(TEXT("SCORE    %d"), GameMode->GetScore()), AccentColor);
+	Line(FString::Printf(TEXT("KILLS    %d / %d"),
+		GameMode->GetTargetsDestroyed(), GameMode->GetTotalTargets()), TextColor);
 
-	DrawText(FString::Printf(TEXT("%.0f m"), DistanceM),
-		AccentColor, X - 18.f, Y + Size + 8.f, GEngine->GetSmallFont(), 1.f);
+	const int32 PrimaryLeft = GameMode->GetPrimaryTargetsRemaining();
+	Line(FString::Printf(TEXT("PRIMARY  %d left"), PrimaryLeft),
+		PrimaryLeft > 0 ? TextColor : AccentColor);
+
+	const int32 Drones = GameMode->GetDronesRemaining();
+	Line(Drones < 0
+			? FString(TEXT("DRONES   unlimited"))
+			: FString::Printf(TEXT("DRONES   %d"), Drones),
+		(Drones >= 0 && Drones <= 2) ? FLinearColor(1.f, 0.5f, 0.3f, 1.f) : TextColor);
+
+	// Centre banners for the states that stop play.
+	const float CentreX = Canvas->SizeX * 0.5f - 150.f;
+	const float CentreY = Canvas->SizeY * 0.28f;
+
+	if (GameMode->IsMissionComplete())
+	{
+		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.65f), CentreX - 20.f, CentreY - 12.f, 340.f, 52.f);
+		DrawText(TEXT("ALL PRIMARY TARGETS DESTROYED"), AccentColor, CentreX, CentreY, Font, 1.f);
+	}
+	else if (GameMode->IsOutOfDrones())
+	{
+		DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.65f), CentreX - 20.f, CentreY - 12.f, 340.f, 52.f);
+		DrawText(TEXT("OUT OF DRONES  -  press R"), FLinearColor(1.f, 0.45f, 0.25f, 1.f), CentreX, CentreY, Font, 1.f);
+	}
+
+	const float Countdown = GameMode->GetRespawnCountdown();
+	if (Countdown > 0.f)
+	{
+		DrawText(FString::Printf(TEXT("NEW DRONE IN %.1f"), Countdown),
+			AccentColor, Canvas->SizeX * 0.5f - 80.f, Canvas->SizeY * 0.62f, Font, 1.f);
+	}
+}
+
+void AFPVHUD::DrawWarheadStatus(const AFPVDronePawn* Drone)
+{
+	if (!Drone)
+	{
+		return;
+	}
+
+	UFont* Font = GEngine->GetMediumFont();
+	const float X = BarLeftMargin - 4.f;
+	const float Y = Canvas->SizeY - 140.f;
+
+	if (Drone->IsWarheadSpent())
+	{
+		DrawText(TEXT("WARHEAD  SPENT"), FLinearColor(0.6f, 0.6f, 0.6f, 0.9f), X, Y, Font, 1.f);
+	}
+	else if (Drone->IsWarheadArmed())
+	{
+		DrawText(TEXT("WARHEAD  ARMED"), FLinearColor(1.f, 0.35f, 0.25f, 1.f), X, Y, Font, 1.f);
+		DrawText(TEXT("F / LMB  airburst"),
+			FLinearColor(1.f, 1.f, 1.f, 0.45f), X, Y + 24.f, GEngine->GetSmallFont(), 1.f);
+	}
+	else
+	{
+		// Safe below the arming altitude, which is why a fresh drone will not go off on the pad.
+		DrawText(TEXT("WARHEAD  SAFE"), FLinearColor(1.f, 0.8f, 0.3f, 0.9f), X, Y, Font, 1.f);
+		DrawText(TEXT("climb to arm"),
+			FLinearColor(1.f, 1.f, 1.f, 0.45f), X, Y + 24.f, GEngine->GetSmallFont(), 1.f);
+	}
+}
+
+void AFPVHUD::DrawTargetMarkers()
+{
+	const AFPVWarGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AFPVWarGameMode>() : nullptr;
+	const AFPVDronePawn* Drone = Cast<AFPVDronePawn>(GetOwningPawn());
+	if (!GameMode || !Drone)
+	{
+		return;
+	}
+
+	TArray<ADroneTarget*> Targets;
+	GameMode->GetLiveTargets(Targets);
+	if (Targets.Num() == 0)
+	{
+		return;
+	}
+
+	const FVector DroneLocation = Drone->GetActorLocation();
+	const ADroneTarget* Nearest = GameMode->FindNearestLiveTarget(DroneLocation);
+	const float BlastRadiusM = Drone->BlastRadius / 100.f;
+
+	UFont* Font = GEngine->GetSmallFont();
+
+	for (const ADroneTarget* Target : Targets)
+	{
+		if (!Target)
+		{
+			continue;
+		}
+
+		const FVector AimPoint = Target->GetAimPoint();
+		const FVector Projected = Project(AimPoint);
+		if (Projected.Z <= 0.f)
+		{
+			continue;   // behind the camera
+		}
+
+		const float DistanceM = FVector::Dist(DroneLocation, AimPoint) / 100.f;
+		const bool bIsNearest = (Target == Nearest);
+
+		// Inside blast range is the moment the airburst becomes worth taking, so it gets its
+		// own colour rather than being something you have to judge from the range readout.
+		const bool bInBlastRange = DistanceM <= BlastRadiusM;
+
+		FLinearColor MarkerColor = bInBlastRange
+			? FLinearColor(1.f, 0.3f, 0.2f, 1.f)
+			: (bIsNearest ? AccentColor : FLinearColor(1.f, 1.f, 1.f, 0.4f));
+
+		// Distant targets get a small fixed bracket; close ones scale up.
+		const float Size = FMath::Clamp(6000.f / FMath::Max(DistanceM, 1.f), 10.f, 110.f);
+		const float X = Projected.X;
+		const float Y = Projected.Y;
+		const float Arm = Size * 0.32f;
+		const float Thickness = bIsNearest ? 2.f : 1.2f;
+
+		auto Corner = [this, MarkerColor, Thickness](float CX, float CY, float DX, float DY, float Length)
+		{
+			DrawLine(CX, CY, CX + DX * Length, CY, MarkerColor, Thickness);
+			DrawLine(CX, CY, CX, CY + DY * Length, MarkerColor, Thickness);
+		};
+
+		Corner(X - Size, Y - Size,  1.f,  1.f, Arm);
+		Corner(X + Size, Y - Size, -1.f,  1.f, Arm);
+		Corner(X - Size, Y + Size,  1.f, -1.f, Arm);
+		Corner(X + Size, Y + Size, -1.f, -1.f, Arm);
+
+		// Label only what is worth reading, so a target-rich level does not become soup.
+		if (bIsNearest || bInBlastRange || DistanceM < 60.f)
+		{
+			DrawText(FString::Printf(TEXT("%s  %.0fm"), *Target->GetDisplayName(), DistanceM),
+				MarkerColor, X - Size, Y + Size + 6.f, Font, 1.f);
+
+			if (Target->GetHealthFraction() < 1.f)
+			{
+				const float BarW = Size * 2.f;
+				DrawRect(FLinearColor(1.f, 1.f, 1.f, 0.2f), X - Size, Y - Size - 10.f, BarW, 4.f);
+				DrawRect(MarkerColor, X - Size, Y - Size - 10.f, BarW * Target->GetHealthFraction(), 4.f);
+			}
+		}
+
+		if (bInBlastRange)
+		{
+			DrawText(TEXT("IN RANGE"), MarkerColor, X - Size, Y + Size + 20.f, Font, 1.f);
+		}
+	}
 }
 
 void AFPVHUD::DrawChannelMonitor()

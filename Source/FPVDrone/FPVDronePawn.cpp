@@ -1,5 +1,7 @@
 #include "FPVDronePawn.h"
+#include "ExplosionEffect.h"
 #include "FPVDrone.h"
+#include "FPVWarGameMode.h"
 #include "RCChannelMapping.h"
 #include "RCDeviceRegistry.h"
 
@@ -56,6 +58,8 @@ void AFPVDronePawn::BeginPlay()
 	Super::BeginPlay();
 
 	SpawnTransform = GetActorTransform();
+
+	DroneMesh->OnComponentHit.AddDynamic(this, &AFPVDronePawn::OnDroneHit);
 
 	// The mesh is scaled, so place the camera in world-space centimetres rather than
 	// letting the parent's 0.25/0.08 scale squash the offset.
@@ -121,6 +125,9 @@ void AFPVDronePawn::BuildInputAssets()
 	ResetAction = NewObject<UInputAction>(this, TEXT("IA_Reset"));
 	ResetAction->ValueType = EInputActionValueType::Boolean;
 
+	DetonateAction = NewObject<UInputAction>(this, TEXT("IA_Detonate"));
+	DetonateAction->ValueType = EInputActionValueType::Boolean;
+
 	InputMapping = NewObject<UInputMappingContext>(this, TEXT("IMC_Drone"));
 
 	// Gamepad sticks come in as -1..1 already. A small dead zone keeps a worn stick from drifting.
@@ -162,6 +169,11 @@ void AFPVDronePawn::BuildInputAssets()
 
 	InputMapping->MapKey(ResetAction, EKeys::R);
 	InputMapping->MapKey(ResetAction, EKeys::Gamepad_FaceButton_Top);
+
+	// Manual airburst. Deliberately not SpaceBar, which the calibration wizard uses to confirm.
+	InputMapping->MapKey(DetonateAction, EKeys::F);
+	InputMapping->MapKey(DetonateAction, EKeys::LeftMouseButton);
+	InputMapping->MapKey(DetonateAction, EKeys::Gamepad_FaceButton_Right);
 }
 
 void AFPVDronePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
@@ -191,6 +203,7 @@ void AFPVDronePawn::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EIC->BindAction(YawAction,      ETriggerEvent::Triggered, this, &AFPVDronePawn::OnYaw);
 	EIC->BindAction(YawAction,      ETriggerEvent::Completed, this, &AFPVDronePawn::OnYaw);
 	EIC->BindAction(ResetAction,    ETriggerEvent::Started,   this, &AFPVDronePawn::OnReset);
+	EIC->BindAction(DetonateAction, ETriggerEvent::Started,   this, &AFPVDronePawn::OnDetonate);
 }
 
 void AFPVDronePawn::OnThrottle(const FInputActionValue& Value) { RawThrottle = Value.Get<float>(); }
@@ -206,6 +219,73 @@ void AFPVDronePawn::OnPitch(const FInputActionValue& Value)
 void AFPVDronePawn::OnReset(const FInputActionValue& /*Value*/)
 {
 	ResetToStart();
+	RearmWarhead();
+}
+
+void AFPVDronePawn::OnDetonate(const FInputActionValue& /*Value*/)
+{
+	Detonate();
+}
+
+// ---------------------------------------------------------------------------------------------
+// Warhead
+// ---------------------------------------------------------------------------------------------
+
+void AFPVDronePawn::OnDroneHit(
+	UPrimitiveComponent* /*HitComponent*/,
+	AActor* /*OtherActor*/,
+	UPrimitiveComponent* /*OtherComp*/,
+	FVector /*NormalImpulse*/,
+	const FHitResult& /*Hit*/)
+{
+	if (!IsWarheadArmed())
+	{
+		return;
+	}
+
+	// A gentle scrape along a wall is survivable; a real impact is not. Judged on the speed
+	// carried into the hit rather than the impulse, which varies with what was struck.
+	const float ImpactSpeed = DroneMesh ? DroneMesh->GetPhysicsLinearVelocity().Size() : 0.f;
+	if (ImpactSpeed >= ArmingImpactSpeed)
+	{
+		Detonate();
+	}
+}
+
+void AFPVDronePawn::Detonate()
+{
+	if (bWarheadSpent || !bWarheadArmed)
+	{
+		return;
+	}
+
+	bWarheadSpent = true;
+	bWarheadArmed = false;
+
+	const FVector BlastOrigin = GetActorLocation();
+
+	AExplosionEffect::Spawn(GetWorld(), BlastOrigin, BlastRadius, 1.2f);
+
+	if (AFPVWarGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AFPVWarGameMode>() : nullptr)
+	{
+		GameMode->ApplyBlast(BlastOrigin, BlastRadius, BlastDamage, this);
+		GameMode->NotifyDroneExpended(this);
+	}
+
+	UE_LOG(LogFPV, Log, TEXT("Warhead detonated at %s"), *BlastOrigin.ToCompactString());
+
+	// Drop out of the sky rather than vanish, so the detonation reads before the reset.
+	if (DroneMesh)
+	{
+		DroneMesh->SetPhysicsLinearVelocity(FVector::ZeroVector);
+		DroneMesh->SetPhysicsAngularVelocityInDegrees(FVector(0.f, 0.f, 720.f));
+	}
+}
+
+void AFPVDronePawn::RearmWarhead()
+{
+	bWarheadSpent = false;
+	bWarheadArmed = false;   // re-arms once clear of the ground, see UpdateFlight
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -268,6 +348,20 @@ void AFPVDronePawn::UpdateFlight(float DeltaSeconds)
 	}
 
 	ApplyRCTransmitterInput();
+
+	// Arm once clear of the launch point, mirroring a real safe-separation distance. Without
+	// this, spawning on the ground can set the warhead off against the floor immediately.
+	if (!bWarheadSpent && !bWarheadArmed && GetAltitudeMeters() * 100.f > ArmingAltitude)
+	{
+		bWarheadArmed = true;
+		UE_LOG(LogFPV, Verbose, TEXT("Warhead armed."));
+	}
+
+	// A spent drone is falling debris -- no thrust, no control.
+	if (bWarheadSpent)
+	{
+		return;
+	}
 
 	const FTransform BodyTransform = GetActorTransform();
 
@@ -369,6 +463,9 @@ void AFPVDronePawn::ResetToStart()
 	PreviousRateError = FVector::ZeroVector;
 	SmoothedThrottle = 0.f;
 	RawThrottle = -1.f;
+
+	bWarheadSpent = false;
+	bWarheadArmed = false;
 
 	DroneMesh->WakeRigidBody();
 }
