@@ -108,11 +108,11 @@ void AEnemyDroneTarget::TickParabolicFlight(float DeltaSeconds)
 	FVector NewLocation = ArcStart + ArcDirection * Along;
 	NewLocation.Z = ArcStart.Z + ArcHeightNow;
 
-	// Pushed wider and higher while hunted, rather than made to jink.
-	if (bEvading)
-	{
-		NewLocation.Z += CurrentArcHeight * 0.35f;
-	}
+	// Pushed higher while hunted, rather than made to jink. Blended in over time: applying it
+	// the instant the flag flips displaces the drone several metres in one frame, which looks
+	// like a teleport rather than a climb.
+	EvadeBlend = FMath::FInterpTo(EvadeBlend, bEvading ? 1.f : 0.f, DeltaSeconds, 1.0f);
+	NewLocation.Z += CurrentArcHeight * 0.35f * EvadeBlend;
 
 	SetActorLocation(NewLocation, false);
 	Velocity = (NewLocation - Previous) / FMath::Max(DeltaSeconds, KINDA_SMALL_NUMBER);
@@ -168,13 +168,26 @@ void AEnemyDroneTarget::Tick(float DeltaSeconds)
 
 	const FVector Location = GetActorLocation();
 
-	// Threat assessment
-	bEvading = false;
+	// Threat assessment with hysteresis, so sitting near the boundary does not flip the state
+	// every frame.
 	FVector ThreatLocation = FVector::ZeroVector;
 	if (const APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
 	{
 		ThreatLocation = Player->GetActorLocation();
-		bEvading = FVector::DistSquared(ThreatLocation, Location) < FMath::Square(DetectionRadius);
+		const float DistanceSq = FVector::DistSquared(ThreatLocation, Location);
+
+		if (!bEvading && DistanceSq < FMath::Square(DetectionRadius))
+		{
+			bEvading = true;
+		}
+		else if (bEvading && DistanceSq > FMath::Square(DetectionRadius * 1.35f))
+		{
+			bEvading = false;
+		}
+	}
+	else
+	{
+		bEvading = false;
 	}
 
 	if (bParabolicFlight)

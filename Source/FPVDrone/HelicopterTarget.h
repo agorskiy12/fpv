@@ -107,6 +107,17 @@ private:
 	FVector OrbitCentre = FVector::ZeroVector;
 	float OrbitAngle = 0.f;
 
+	/**
+	 * Eased rather than switched.
+	 *
+	 * Reading these straight off bFleeing moved the aircraft several metres in a single frame
+	 * the instant the player crossed the detection radius. That is a teleport, and temporal
+	 * anti-aliasing renders a teleport as two aircraft until it resolves.
+	 */
+	float CurrentOrbitRadius = 0.f;
+	float CurrentSpeed = 0.f;
+	float CurrentAltitude = 0.f;
+
 	void TickOrbit(float DeltaSeconds);
 	void TickRoute(float DeltaSeconds);
 

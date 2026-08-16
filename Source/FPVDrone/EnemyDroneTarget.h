@@ -101,6 +101,9 @@ private:
 	float ArcDuration = 6.f;
 	float CurrentArcHeight = 1800.f;
 
+	/** Eased 0..1, so the evasion climb blends in rather than displacing the drone in one frame. */
+	float EvadeBlend = 0.f;
+
 	void BeginNewArc(const FVector& FromLocation);
 	void TickParabolicFlight(float DeltaSeconds);
 	void TickRoutePatrol(float DeltaSeconds);

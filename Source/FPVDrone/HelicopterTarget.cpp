@@ -90,6 +90,10 @@ void AHelicopterTarget::BeginPlay()
 	OrbitCentre = GetActorLocation() + OrbitCentreOffset;
 	OrbitAngle = 0.f;
 
+	CurrentOrbitRadius = OrbitRadius;
+	CurrentSpeed = CruiseSpeed;
+	CurrentAltitude = OrbitAltitude;
+
 	UE_LOG(LogFPV, Log, TEXT("Helicopter: %s, centre %s, radius %.0f m, altitude %.0f m"),
 		bOrbit ? TEXT("orbiting") : TEXT("on route"),
 		*OrbitCentre.ToCompactString(), OrbitRadius / 100.f, OrbitAltitude / 100.f);
@@ -97,27 +101,36 @@ void AHelicopterTarget::BeginPlay()
 
 void AHelicopterTarget::TickOrbit(float DeltaSeconds)
 {
+	// Everything driven by bFleeing is eased. Switching any of it directly moves the aircraft
+	// a large distance in one frame, which reads as a glitch rather than as evasion.
+	const float TargetRadius = FMath::Max(OrbitRadius, 100.f) * (bFleeing ? 1.15f : 1.f);
+	CurrentOrbitRadius = FMath::FInterpTo(CurrentOrbitRadius, TargetRadius, DeltaSeconds, 0.8f);
+
+	const float TargetSpeed = bFleeing ? RunSpeed : CruiseSpeed;
+	CurrentSpeed = FMath::FInterpTo(CurrentSpeed, TargetSpeed, DeltaSeconds, 1.2f);
+
+	// Climbs while hunted and settles back afterwards, rather than permanently overwriting the
+	// configured altitude.
+	if (bFleeing)
+	{
+		CurrentAltitude += FleeClimbRate * DeltaSeconds;
+	}
+	else
+	{
+		CurrentAltitude = FMath::FInterpTo(CurrentAltitude, OrbitAltitude, DeltaSeconds, 0.35f);
+	}
+
 	// Constant ground speed converted to angular rate, so changing the radius changes how long
 	// a lap takes rather than how fast the aircraft appears to fly.
-	const float Speed = bFleeing ? RunSpeed : CruiseSpeed;
-	const float Radius = FMath::Max(OrbitRadius, 100.f);
-	const float AngularRate = (Speed / Radius) * (bOrbitClockwise ? 1.f : -1.f);
+	const float AngularRate = (CurrentSpeed / FMath::Max(CurrentOrbitRadius, 100.f))
+		* (bOrbitClockwise ? 1.f : -1.f);
 
 	OrbitAngle += AngularRate * DeltaSeconds;
 
-	// Being hunted pushes it wider and higher rather than making it dodge.
-	const float EffectiveRadius = Radius * (bFleeing ? 1.15f : 1.f);
-	float EffectiveAltitude = OrbitAltitude;
-	if (bFleeing)
-	{
-		EffectiveAltitude += FleeClimbRate * DeltaSeconds;
-		OrbitAltitude = EffectiveAltitude;   // the climb persists; it does not sink back down
-	}
-
 	const FVector Position = OrbitCentre + FVector(
-		FMath::Cos(OrbitAngle) * EffectiveRadius,
-		FMath::Sin(OrbitAngle) * EffectiveRadius,
-		EffectiveAltitude + FMath::Sin(BobPhase) * BobAmplitude);
+		FMath::Cos(OrbitAngle) * CurrentOrbitRadius,
+		FMath::Sin(OrbitAngle) * CurrentOrbitRadius,
+		CurrentAltitude + FMath::Sin(BobPhase) * BobAmplitude);
 
 	const FVector Previous = GetActorLocation();
 	SetActorLocation(Position, false);
@@ -147,11 +160,27 @@ void AHelicopterTarget::Tick(float DeltaSeconds)
 	BobPhase += DeltaSeconds * BobFrequency;
 	RotorSpin += DeltaSeconds * 1800.f;
 
-	// Threat assessment, shared by both flight modes.
-	bFleeing = false;
+	// Threat assessment with hysteresis: it starts running at DetectionRadius but does not stop
+	// until well outside it. Without the gap, hovering near the boundary flips the state every
+	// frame and the aircraft judders in place.
 	if (const APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
 	{
-		bFleeing = FVector::DistSquared(Player->GetActorLocation(), GetActorLocation()) < FMath::Square(DetectionRadius);
+		const float DistanceSq = FVector::DistSquared(Player->GetActorLocation(), GetActorLocation());
+		const float EnterSq = FMath::Square(DetectionRadius);
+		const float ExitSq = FMath::Square(DetectionRadius * 1.35f);
+
+		if (!bFleeing && DistanceSq < EnterSq)
+		{
+			bFleeing = true;
+		}
+		else if (bFleeing && DistanceSq > ExitSq)
+		{
+			bFleeing = false;
+		}
+	}
+	else
+	{
+		bFleeing = false;
 	}
 
 	if (bOrbit)
