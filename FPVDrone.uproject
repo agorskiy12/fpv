@@ -26,6 +26,18 @@
 		{
 			"Name": "GameInputWindows",
 			"Enabled": true
+		},
+		{
+			"Name": "Niagara",
+			"Enabled": true
+		},
+		{
+			"Name": "Fab",
+			"Enabled": true
+		},
+		{
+			"Name": "Bridge",
+			"Enabled": true
 		}
 	]
 }

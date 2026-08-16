@@ -40,6 +40,28 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Explosion")
 	float PeakLightIntensity = 240000.f;
 
+	// ---------------------------------------------------------------------------------------
+	// Assets
+	//
+	// Set these on the class defaults (or via UFPVEffectSettings) and the code-drawn fallback
+	// switches off automatically. Nothing else needs changing to move to real VFX.
+	// ---------------------------------------------------------------------------------------
+
+	/** Niagara system to play. When set, the debug-sphere fireball is suppressed. */
+	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
+	TObjectPtr<class UNiagaraSystem> ExplosionFX;
+
+	/** Scales the Niagara system to the blast radius, assuming the system authors at 1 m. */
+	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
+	bool bScaleFXToRadius = true;
+
+	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
+	TObjectPtr<USoundBase> ExplosionSound;
+
+	/** Keep the light flash even when a Niagara system provides its own. */
+	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
+	bool bAlwaysUseLightFlash = true;
+
 protected:
 	UPROPERTY(VisibleAnywhere, Category = "Explosion")
 	TObjectPtr<USceneComponent> Root;

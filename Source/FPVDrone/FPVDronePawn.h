@@ -91,9 +91,12 @@ public:
 	// Thrust and drag
 	// ---------------------------------------------------------------------------------------
 
-	/** Thrust-to-weight at full throttle. 3.0 is a punchy freestyle quad; 2.0 is a cinematic build. */
+	/**
+	 * Thrust-to-weight at full throttle.
+	 * 2.0 is cinematic, 3.0 freestyle, 3.6 a light race build, 5.0+ is a rocket.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Thrust", meta = (ClampMin = "1.0"))
-	float ThrustToWeightRatio = 3.0f;
+	float ThrustToWeightRatio = 3.6f;
 
 	/** Motor spool-up time constant, seconds. Stops throttle from being instantaneous. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Thrust", meta = (ClampMin = "0.0"))
@@ -101,11 +104,15 @@ public:
 
 	/**
 	 * Quadratic drag per body axis (X forward, Y right, Z up), in 1/m.
-	 * Terminal velocity on an axis is roughly sqrt(9.8 / coefficient).
-	 * 0.011 gives ~30 m/s; the higher lateral and vertical values model the quad's broadside area.
+	 *
+	 * Terminal velocity on an axis is roughly sqrt(9.8 / coefficient), so this is what sets top
+	 * speed. Current values give about 130 km/h nose-on, 92 sideways and 76 climbing -- the
+	 * higher lateral and vertical numbers model the quad's much larger broadside area.
+	 *
+	 * Lower the X value for more speed: 0.0075 is ~130 km/h, 0.006 is ~145, 0.004 is ~178.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Drag")
-	FVector DragCoefficients = FVector(0.011f, 0.020f, 0.028f);
+	FVector DragCoefficients = FVector(0.0075f, 0.015f, 0.022f);
 
 	// ---------------------------------------------------------------------------------------
 	// Camera

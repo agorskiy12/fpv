@@ -29,6 +29,12 @@ ADroneTarget::ADroneTarget()
 		Part->SetCollisionProfileName(TEXT("BlockAllDynamic"));
 		BodyParts.Add(Part);
 	}
+
+	OverrideMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("OverrideMesh"));
+	OverrideMesh->SetupAttachment(TargetRoot);
+	OverrideMesh->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+	OverrideMesh->SetVisibility(false);
+	OverrideMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void ADroneTarget::OnConstruction(const FTransform& Transform)
@@ -85,6 +91,33 @@ void ADroneTarget::HideUnusedParts()
 void ADroneTarget::RebuildBody()
 {
 	PartsUsed = 0;
+
+	// A real mesh replaces the placeholder outright. Gameplay still reads BodySize, so swapping
+	// art in does not silently change blast falloff or HUD marker sizing.
+	if (BodyMesh)
+	{
+		OverrideMesh->SetStaticMesh(BodyMesh);
+		OverrideMesh->SetRelativeLocation(MeshOffset);
+		OverrideMesh->SetRelativeRotation(MeshRotation);
+		OverrideMesh->SetRelativeScale3D(MeshScale);
+		OverrideMesh->SetVisibility(true);
+		OverrideMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+
+		if (BodyMaterial)
+		{
+			const int32 NumMaterials = OverrideMesh->GetNumMaterials();
+			for (int32 Slot = 0; Slot < NumMaterials; ++Slot)
+			{
+				OverrideMesh->SetMaterial(Slot, BodyMaterial);
+			}
+		}
+
+		HideUnusedParts();   // PartsUsed is 0, so this hides all of them
+		return;
+	}
+
+	OverrideMesh->SetVisibility(false);
+	OverrideMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	const FVector Size = BodySize.ComponentMax(FVector(20.f));
 	const float HalfZ = Size.Z * 0.5f;
@@ -192,6 +225,22 @@ void ADroneTarget::OnDestroyed_Internal(AActor* Killer)
 		{
 			GameMode->ApplyBlast(Centre, SecondaryBlastRadius, SecondaryBlastDamage, Killer, this);
 		}
+	}
+
+	// A wreck mesh leaves something behind to fly past; without one the target simply goes away.
+	if (DestroyedMesh)
+	{
+		OverrideMesh->SetStaticMesh(DestroyedMesh);
+		OverrideMesh->SetRelativeLocation(MeshOffset);
+		OverrideMesh->SetRelativeRotation(MeshRotation);
+		OverrideMesh->SetRelativeScale3D(MeshScale);
+		OverrideMesh->SetVisibility(true);
+		OverrideMesh->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	}
+	else
+	{
+		OverrideMesh->SetVisibility(false);
+		OverrideMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	}
 
 	for (UStaticMeshComponent* Part : BodyParts)

@@ -120,9 +120,9 @@ Select the drone and open the **Drone** categories in the Details panel. Everyth
 | `CenterSensitivity` | 200 °/s | Finer control near stick centre |
 | `RateExpo` | 0.54 | Softens the middle of the throw |
 | `PID_P` / `PID_I` / `PID_D` | 0.25 / 0.05 / 0.004 | Rate loop response. Raise P for sharper, add D if it overshoots |
-| `ThrustToWeightRatio` | 3.0 | 3.0 is punchy freestyle, 2.0 is cinematic |
+| `ThrustToWeightRatio` | 3.6 | Acceleration. 2.0 cinematic, 3.0 freestyle, 3.6 light race |
 | `MotorResponseTime` | 0.06 s | Throttle lag |
-| `DragCoefficients` | 0.011/0.020/0.028 | Terminal velocity ≈ √(9.8 / coefficient) m/s |
+| `DragCoefficients` | 0.0075/0.015/0.022 | **Top speed.** Terminal ≈ √(9.8 / coefficient) m/s — currently ~130 km/h nose-on |
 | `CameraTiltDegrees` | 25° | More tilt = faster level flight |
 
 ## Known first-flight check

@@ -3,6 +3,9 @@
 #include "Components/PointLightComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "PhysicsEngine/RadialForceComponent.h"
 
 AExplosionEffect::AExplosionEffect()
@@ -54,10 +57,28 @@ void AExplosionEffect::BeginPlay()
 {
 	Super::BeginPlay();
 
-	FlashLight->SetIntensity(PeakLightIntensity);
+	if (ExplosionFX)
+	{
+		const float FXScale = bScaleFXToRadius ? FMath::Max(Radius / 100.f, 0.1f) : 1.f;
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			GetWorld(), ExplosionFX, GetActorLocation(), FRotator::ZeroRotator,
+			FVector(FXScale), /*bAutoDestroy=*/true);
+	}
+
+	if (ExplosionSound)
+	{
+		UGameplayStatics::PlaySoundAtLocation(GetWorld(), ExplosionSound, GetActorLocation());
+	}
+
+	if (bAlwaysUseLightFlash || !ExplosionFX)
+	{
+		FlashLight->SetIntensity(PeakLightIntensity);
+	}
+
 	BlastForce->FireImpulse();
 
-	SetLifeSpan(Duration + 0.1f);
+	// A Niagara system outlives the flash, so hang around long enough for it to finish.
+	SetLifeSpan(ExplosionFX ? FMath::Max(Duration, 4.f) : Duration + 0.1f);
 }
 
 void AExplosionEffect::Tick(float DeltaSeconds)
@@ -71,7 +92,12 @@ void AExplosionEffect::Tick(float DeltaSeconds)
 	FlashLight->SetIntensity(PeakLightIntensity * FMath::Pow(1.f - Alpha, 3.f));
 
 #if ENABLE_DRAW_DEBUG
-	// Stand-in for a fireball until there is real VFX.
+	// Stand-in for a fireball, suppressed as soon as real VFX is assigned.
+	if (ExplosionFX)
+	{
+		return;
+	}
+
 	const float BallRadius = Radius * FMath::Sqrt(Alpha) * 0.9f;
 	const uint8 FadeAlpha = static_cast<uint8>(255.f * (1.f - Alpha));
 	DrawDebugSphere(GetWorld(), GetActorLocation(), BallRadius, 16,

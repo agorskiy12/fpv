@@ -70,9 +70,42 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Secondary")
 	float SecondaryBlastDamage = 160.f;
 
-	/** Overall size in centimetres. Interpreted per kind. */
+	/** Overall size in centimetres. Interpreted per kind, and ignored when a mesh override is set. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target")
 	FVector BodySize = FVector(600.f, 400.f, 300.f);
+
+	// ---------------------------------------------------------------------------------------
+	// Visuals
+	//
+	// The primitive body is a placeholder. Assign a real mesh here and the primitives are
+	// hidden entirely -- collision, damage and HUD marker sizing still come from BodySize, so
+	// gameplay does not shift when the art changes.
+	// ---------------------------------------------------------------------------------------
+
+	/** Real mesh for this target. Leave empty to use the code-built placeholder. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Visuals")
+	TObjectPtr<UStaticMesh> BodyMesh;
+
+	/** Optional wreck mesh, swapped in on destruction instead of simply hiding the target. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Visuals")
+	TObjectPtr<UStaticMesh> DestroyedMesh;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Visuals")
+	FVector MeshOffset = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Visuals")
+	FRotator MeshRotation = FRotator::ZeroRotator;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Visuals")
+	FVector MeshScale = FVector(1.f, 1.f, 1.f);
+
+	/** Optional material override applied to every slot of the mesh. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Visuals")
+	TObjectPtr<UMaterialInterface> BodyMaterial;
+
+	/** True when a real mesh is in use rather than the placeholder. */
+	UFUNCTION(BlueprintPure, Category = "Target|Visuals")
+	bool IsUsingMeshOverride() const { return BodyMesh != nullptr; }
 
 	/** Apply blast damage, already scaled for distance by the caller. */
 	UFUNCTION(BlueprintCallable, Category = "Target")
@@ -109,6 +142,10 @@ protected:
 	/** Parts are generic so one actor class can express every kind. */
 	UPROPERTY(VisibleAnywhere, Category = "Target")
 	TArray<TObjectPtr<UStaticMeshComponent>> BodyParts;
+
+	/** Carries BodyMesh / DestroyedMesh when one is assigned. */
+	UPROPERTY(VisibleAnywhere, Category = "Target")
+	TObjectPtr<UStaticMeshComponent> OverrideMesh;
 
 	static constexpr int32 NumBodyParts = 6;
 

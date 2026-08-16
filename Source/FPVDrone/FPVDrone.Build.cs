@@ -13,7 +13,8 @@ public class FPVDrone : ModuleRules
 			"Engine",
 			"InputCore",
 			"EnhancedInput",
-			"PhysicsCore"
+			"PhysicsCore",
+			"Niagara"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
