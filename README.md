@@ -288,7 +288,7 @@ Resolved while getting the first compile through:
 | | |
 |---|---|
 | Game target, current code | **Builds clean** — zero warnings, zero errors |
-| Editor target, current code | **Not yet rebuilt.** Last clean build predates the channel monitor; blocked on closing the editor (Live Coding holds the module binaries, and the new plugins need a restart regardless) |
+| Editor target, current code | **Builds clean** — zero warnings, zero errors |
 | Flight model behaviour | **Never run.** No level has been flown yet |
 | Axis sign mapping | **Unverified** — derived by hand, see *Known first-flight check* above |
 | Channel monitor | **Compiles, never displayed.** Needs an editor-target build and a level |
