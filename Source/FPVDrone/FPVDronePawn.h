@@ -130,6 +130,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Sticks")
 	bool bInvertPitchStick = true;
 
+	/**
+	 * Leave the mouse cursor free instead of letting the viewport capture it.
+	 *
+	 * A drone sim never uses the mouse, and capturing it makes the standalone game awkward to
+	 * alt-tab out of. It also makes it hard to tell whether the window actually has focus --
+	 * which matters, because RawInput only delivers to the focused window.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Sticks")
+	bool bReleaseMouseCursor = true;
+
 	// ---------------------------------------------------------------------------------------
 	// Axis sign correction
 	// ---------------------------------------------------------------------------------------

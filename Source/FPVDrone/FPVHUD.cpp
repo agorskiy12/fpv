@@ -1,6 +1,8 @@
 #include "FPVHUD.h"
+#include "FPVDrone.h"
 #include "FPVDronePawn.h"
 #include "FPVGameMode.h"
+#include "RCDeviceRegistry.h"
 #include "RaceGate.h"
 
 #include "Engine/Canvas.h"
@@ -24,6 +26,43 @@ namespace
 		TEXT("  2 = all 24 axes\n")
 		TEXT("Use fpv.ResetChannelRanges to clear the observed min/max."),
 		ECVF_Default);
+
+	static TAutoConsoleVariable<int32> CVarShowDevices(
+		TEXT("fpv.ShowDevices"),
+		0,
+		TEXT("Show the connected input device picker.\n")
+		TEXT("  0 = off\n")
+		TEXT("  1 = on -- press 1-9 to select a device\n")
+		TEXT("Use fpv.RefreshDevices after plugging or unplugging hardware."),
+		ECVF_Default);
+
+	FAutoConsoleCommand CmdRefreshDevices(
+		TEXT("fpv.RefreshDevices"),
+		TEXT("Re-enumerate connected HID devices and re-apply the selection."),
+		FConsoleCommandDelegate::CreateStatic([]()
+		{
+			FRCDeviceRegistry::Get().Refresh();
+			UE_LOG(LogFPV, Log, TEXT("Device list refreshed: %d device(s), %d flyable."),
+				FRCDeviceRegistry::Get().GetDevices().Num(),
+				FRCDeviceRegistry::Get().GetGameDeviceIndices().Num());
+		}));
+
+	FAutoConsoleCommand CmdSelectDevice(
+		TEXT("fpv.SelectDevice"),
+		TEXT("Select a flyable device by menu slot number, e.g. 'fpv.SelectDevice 1'."),
+		FConsoleCommandWithArgsDelegate::CreateStatic([](const TArray<FString>& Args)
+		{
+			if (Args.Num() < 1)
+			{
+				UE_LOG(LogFPV, Warning, TEXT("Usage: fpv.SelectDevice <slot>"));
+				return;
+			}
+			const int32 Slot = FCString::Atoi(*Args[0]) - 1;   // menu slots are 1-based
+			if (!FRCDeviceRegistry::Get().SelectGameDevice(Slot))
+			{
+				UE_LOG(LogFPV, Warning, TEXT("No device in slot %s."), *Args[0]);
+			}
+		}));
 }
 
 void AFPVHUD::DrawHUD()
@@ -35,9 +74,23 @@ void AFPVHUD::DrawHUD()
 		return;
 	}
 
+	// Deferred to the first draw: RawInput's device is created during Slate startup, so
+	// registering a usage any earlier than this would silently fail.
+	EnsureDeviceRegistryInitialised();
+
+	// Retried every frame: RawInput's device is created after the first HUD draw, so a single
+	// attempt at startup always loses that race.
+	FRCDeviceRegistry::Get().TickRegistration();
+
 	// Sampled unconditionally so the observed ranges keep accumulating while the overlay is
 	// hidden, and drawn before the pawn check so it still works if possession failed.
 	ChannelMonitor.Sample(GetOwningPlayerController());
+
+	if (CVarShowDevices.GetValueOnGameThread() != 0)
+	{
+		HandleDeviceMenuInput();
+		DrawDeviceMenu();
+	}
 
 	if (CVarShowChannels.GetValueOnGameThread() != 0)
 	{
@@ -291,4 +344,124 @@ void AFPVHUD::DrawChannelMonitor()
 			: FString(TEXT("- "));
 	}
 	DrawText(ButtonLine, TextColor, PanelX + 10.f, RowY + 6.f, Font, 1.f);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Device picker
+// ---------------------------------------------------------------------------------------------
+
+void AFPVHUD::EnsureDeviceRegistryInitialised()
+{
+	if (bDeviceRegistryInitialised)
+	{
+		return;
+	}
+	bDeviceRegistryInitialised = true;
+
+	FRCDeviceRegistry& Registry = FRCDeviceRegistry::Get();
+	Registry.Refresh();
+
+	const FRCInputDeviceInfo* Selected = Registry.GetSelectedDevice();
+	UE_LOG(LogFPV, Log, TEXT("Input devices: %d total, %d flyable. Selected: %s (%s)"),
+		Registry.GetDevices().Num(),
+		Registry.GetGameDeviceIndices().Num(),
+		Selected ? *Selected->GetDisplayName() : TEXT("none"),
+		*Registry.GetStatusMessage());
+}
+
+void AFPVHUD::HandleDeviceMenuInput()
+{
+	APlayerController* PC = GetOwningPlayerController();
+	if (!PC)
+	{
+		return;
+	}
+
+	static const FKey NumberKeys[9] = {
+		EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five,
+		EKeys::Six, EKeys::Seven, EKeys::Eight, EKeys::Nine
+	};
+
+	for (int32 Slot = 0; Slot < 9; ++Slot)
+	{
+		if (PC->WasInputKeyJustPressed(NumberKeys[Slot]))
+		{
+			FRCDeviceRegistry::Get().SelectGameDevice(Slot);
+			break;
+		}
+	}
+}
+
+void AFPVHUD::DrawDeviceMenu()
+{
+	UFont* Font = GEngine->GetSmallFont();
+	FRCDeviceRegistry& Registry = FRCDeviceRegistry::Get();
+
+	const TArray<int32>& Slots = Registry.GetGameDeviceIndices();
+	const TArray<FRCInputDeviceInfo>& Devices = Registry.GetDevices();
+
+	constexpr float PanelW = 580.f;
+	constexpr float RowHeight = 20.f;
+	constexpr float HeaderHeight = 48.f;
+
+	const float PanelX = (Canvas->SizeX - PanelW) * 0.5f;
+	constexpr float PanelY = 58.f;
+	const float PanelH = HeaderHeight + FMath::Max(Slots.Num(), 1) * RowHeight + 44.f;
+
+	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.80f), PanelX, PanelY, PanelW, PanelH);
+
+	DrawText(TEXT("INPUT DEVICE"), AccentColor, PanelX + 12.f, PanelY + 8.f, Font, 1.f);
+	DrawText(TEXT("press 1-9 to select   |   fpv.RefreshDevices after plugging in"),
+		FLinearColor(1.f, 1.f, 1.f, 0.5f), PanelX + 12.f, PanelY + 26.f, Font, 1.f);
+
+	float RowY = PanelY + HeaderHeight;
+
+	if (Slots.Num() == 0)
+	{
+		DrawText(TEXT("No joystick or gamepad devices found."),
+			FLinearColor(1.f, 0.75f, 0.2f, 1.f), PanelX + 12.f, RowY, Font, 1.f);
+		RowY += RowHeight;
+	}
+
+	for (int32 Slot = 0; Slot < Slots.Num(); ++Slot)
+	{
+		const int32 DeviceIndex = Slots[Slot];
+		if (!Devices.IsValidIndex(DeviceIndex))
+		{
+			continue;
+		}
+
+		const FRCInputDeviceInfo& Device = Devices[DeviceIndex];
+		const bool bSelected = (DeviceIndex == Registry.GetSelectedIndex());
+
+		const FLinearColor RowColor = bSelected
+			? AccentColor
+			: (Device.IsKnownRadio() ? FLinearColor(0.7f, 0.9f, 1.f, 0.9f) : TextColor);
+
+		DrawText(FString::Printf(TEXT("[%d]"), Slot + 1), RowColor, PanelX + 12.f, RowY, Font, 1.f);
+		DrawText(Device.GetDisplayName(), RowColor, PanelX + 46.f, RowY, Font, 1.f);
+		DrawText(Device.GetIdString(), RowColor, PanelX + 300.f, RowY, Font, 1.f);
+		DrawText(Device.GetUsageLabel(), RowColor, PanelX + 382.f, RowY, Font, 1.f);
+
+		if (bSelected)
+		{
+			DrawText(TEXT("ACTIVE"), AccentColor, PanelX + 480.f, RowY, Font, 1.f);
+		}
+
+		RowY += RowHeight;
+	}
+
+	// Registration status. This is the line that says whether input can actually arrive.
+	const FLinearColor StatusColor = Registry.IsRegistered()
+		? FLinearColor(0.5f, 1.f, 0.6f, 0.9f)
+		: FLinearColor(1.f, 0.6f, 0.3f, 1.f);
+	DrawText(FString::Printf(TEXT("RawInput: %s"), *Registry.GetStatusMessage()),
+		StatusColor, PanelX + 12.f, RowY + 6.f, Font, 1.f);
+
+	const int32 OtherDevices = Devices.Num() - Slots.Num();
+	if (OtherDevices > 0)
+	{
+		DrawText(FString::Printf(TEXT("(%d other HID device(s) present but not flyable)"), OtherDevices),
+			FLinearColor(1.f, 1.f, 1.f, 0.4f), PanelX + 12.f, RowY + 24.f, Font, 1.f);
+	}
 }

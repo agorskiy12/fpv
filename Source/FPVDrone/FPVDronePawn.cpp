@@ -69,10 +69,21 @@ void AFPVDronePawn::BeginPlay()
 // so this runs from both. AddMappingContext is safe to call twice.
 void AFPVDronePawn::AddInputMapping()
 {
-	const APlayerController* PC = Cast<APlayerController>(GetController());
+	APlayerController* PC = Cast<APlayerController>(GetController());
 	if (!PC || !InputMapping)
 	{
 		return;
+	}
+
+	if (bReleaseMouseCursor)
+	{
+		// Keep the cursor usable so the standalone game can be alt-tabbed, and so it is obvious
+		// whether the window has focus -- RawInput only delivers to the focused window.
+		PC->bShowMouseCursor = true;
+		FInputModeGameAndUI InputMode;
+		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
+		InputMode.SetHideCursorDuringCapture(false);
+		PC->SetInputMode(InputMode);
 	}
 
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem =

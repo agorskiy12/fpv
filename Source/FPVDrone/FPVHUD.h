@@ -36,5 +36,16 @@ private:
 	/** Debug overlay for bringing up an RC transmitter. Toggle with the fpv.ShowChannels console variable. */
 	void DrawChannelMonitor();
 
+	/** Connected-device picker. Toggle with fpv.ShowDevices; pick a slot with the number keys. */
+	void DrawDeviceMenu();
+
+	/** Number-key selection while the device menu is open. */
+	void HandleDeviceMenuInput();
+
+	/** Enumerate devices and auto-select once, on the first frame the HUD draws. */
+	void EnsureDeviceRegistryInitialised();
+
 	FRCChannelMonitor ChannelMonitor;
+
+	bool bDeviceRegistryInitialised = false;
 };
