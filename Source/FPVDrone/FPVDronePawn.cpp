@@ -44,6 +44,18 @@ AFPVDronePawn::AFPVDronePawn()
 	DroneMesh->SetAngularDamping(0.15f);
 	DroneMesh->SetMassOverrideInKg(NAME_None, 0.65f, true);
 
+	AirframeVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("AirframeVisual"));
+	AirframeVisual->SetupAttachment(DroneMesh);
+	AirframeVisual->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	AirframeVisual->SetVisibility(false);
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> KamikazeMesh(
+		TEXT("/Game/alstra_infinite/PolyPack-Starter/Kamikaze_Drones/Meshes/SM_KamikazeDroneV1.SM_KamikazeDroneV1"));
+	if (KamikazeMesh.Succeeded())
+	{
+		AirframeMesh = KamikazeMesh.Object;
+	}
+
 	FPVCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FPVCamera"));
 	FPVCamera->SetupAttachment(DroneMesh);
 	FPVCamera->bUsePawnControlRotation = false;   // rigidly mounted -- this is the whole point
@@ -60,6 +72,30 @@ void AFPVDronePawn::BeginPlay()
 	SpawnTransform = GetActorTransform();
 
 	DroneMesh->OnComponentHit.AddDynamic(this, &AFPVDronePawn::OnDroneHit);
+
+	// Swap the placeholder box for the real airframe, if one is assigned.
+	if (AirframeMesh && AirframeVisual)
+	{
+		AirframeVisual->SetStaticMesh(AirframeMesh);
+		AirframeVisual->SetRelativeRotation(AirframeRotation);
+
+		// The parent box is non-uniformly scaled, so a uniform world scale needs the parent's
+		// scale divided back out component-wise.
+		FVector WorldScale(1.f);
+		if (bAutoScaleAirframe)
+		{
+			const float LongestAxis = AirframeMesh->GetBoundingBox().GetSize().GetMax();
+			if (LongestAxis > KINDA_SMALL_NUMBER)
+			{
+				WorldScale = FVector(AirframeLength / LongestAxis);
+			}
+		}
+		AirframeVisual->SetRelativeScale3D(WorldScale / DroneMesh->GetRelativeScale3D());
+		AirframeVisual->SetVisibility(true);
+
+		// The box remains as the physics body; it is simply no longer drawn.
+		DroneMesh->SetVisibility(false);
+	}
 
 	// The mesh is scaled, so place the camera in world-space centimetres rather than
 	// letting the parent's 0.25/0.08 scale squash the offset.

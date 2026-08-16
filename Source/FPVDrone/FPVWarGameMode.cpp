@@ -98,19 +98,29 @@ namespace
 				}
 			});
 
-		// Two UAVs at different heights.
-		SpawnTarget(AEnemyDroneTarget::StaticClass(), Origin + FVector(0.f, 0.f, 2200.f), FRotator::ZeroRotator,
-			[](ADroneTarget* T) {});
+		// A flight of loitering munitions, spread across heights and speeds so the sky is never
+		// empty and there is always something to climb after.
+		struct FUAVSpawn { FVector Offset; float Yaw; float Speed; bool bPrimary; };
+		static const FUAVSpawn UAVs[] = {
+			{ FVector(     0.f,      0.f, 2200.f),   0.f,  900.f, true  },
+			{ FVector( -6000.f, -2000.f, 3400.f), 120.f, 1200.f, false },
+			{ FVector(  7000.f, -5000.f, 2800.f), 210.f, 1050.f, false },
+			{ FVector( -3000.f,  7500.f, 4200.f),  60.f,  800.f, true  },
+			{ FVector( 11000.f,  6000.f, 3000.f), 300.f, 1350.f, false },
+		};
 
-		SpawnTarget(AEnemyDroneTarget::StaticClass(), Origin + FVector(-6000.f, -2000.f, 3400.f), FRotator(0.f, 120.f, 0.f),
-			[](ADroneTarget* T)
-			{
-				if (AEnemyDroneTarget* D = Cast<AEnemyDroneTarget>(T))
+		for (const FUAVSpawn& Spawn : UAVs)
+		{
+			SpawnTarget(AEnemyDroneTarget::StaticClass(), Origin + Spawn.Offset, FRotator(0.f, Spawn.Yaw, 0.f),
+				[&Spawn](ADroneTarget* T)
 				{
-					D->PatrolSpeed = 1200.f;
-					D->bPrimaryObjective = false;
-				}
-			});
+					if (AEnemyDroneTarget* D = Cast<AEnemyDroneTarget>(T))
+					{
+						D->PatrolSpeed = Spawn.Speed;
+						D->bPrimaryObjective = Spawn.bPrimary;
+					}
+				});
+		}
 
 		// The transport heli, high and well clear. Kept far out deliberately: it is large, and
 		// spawning anything large near the player start risks the drone starting inside it.

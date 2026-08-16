@@ -48,6 +48,31 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Drone")
 	TObjectPtr<UCameraComponent> FPVCamera;
 
+	/**
+	 * Visual airframe, deliberately separate from the physics body.
+	 *
+	 * DroneMesh stays a simple box for collision and inertia; swapping the model must not change
+	 * how the thing flies. You barely see your own airframe in FPV anyway -- this exists almost
+	 * entirely for the kill cam, which is the one time the drone is actually on screen.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Drone|Visuals")
+	TObjectPtr<UStaticMeshComponent> AirframeVisual;
+
+	/** Model to display. When set, the placeholder box is hidden. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Visuals")
+	TObjectPtr<UStaticMesh> AirframeMesh;
+
+	/** Longest dimension of the airframe in centimetres, used to normalise the imported scale. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Visuals")
+	float AirframeLength = 55.f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Visuals")
+	bool bAutoScaleAirframe = true;
+
+	/** Correction if the model does not face along +X. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Visuals")
+	FRotator AirframeRotation = FRotator::ZeroRotator;
+
 	// ---------------------------------------------------------------------------------------
 	// Rates -- Betaflight "actual rates". Defaults are a typical 5" freestyle setup.
 	// ---------------------------------------------------------------------------------------

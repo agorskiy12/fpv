@@ -1,8 +1,10 @@
 #include "EnemyDroneTarget.h"
 #include "FPVDrone.h"
 
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "UObject/ConstructorHelpers.h"
 
 AEnemyDroneTarget::AEnemyDroneTarget()
 {
@@ -18,6 +20,18 @@ AEnemyDroneTarget::AEnemyDroneTarget()
 	DebrisCount = 14;
 	DebrisSpeed = 700.f;
 	DebrisChunkSize = 30.f;
+
+	// Same airframe the operator flies. Enemy loitering munitions hunting the same ground you
+	// are is a better fiction than an abstract shape, and it costs nothing to reuse the model.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> KamikazeMesh(
+		TEXT("/Game/alstra_infinite/PolyPack-Starter/Kamikaze_Drones/Meshes/SM_KamikazeDroneV1.SM_KamikazeDroneV1"));
+	if (KamikazeMesh.Succeeded())
+	{
+		BodyMesh = KamikazeMesh.Object;
+	}
+
+	// Bigger than a real quad so it is trackable against the sky at a few hundred metres.
+	BodySize = FVector(160.f, 160.f, 60.f);
 
 	// A box circuit, so a freshly placed UAV is already patrolling.
 	RoutePoints = {
