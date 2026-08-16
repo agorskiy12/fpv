@@ -7,6 +7,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "PhysicsEngine/RadialForceComponent.h"
+#include "UObject/ConstructorHelpers.h"
 
 AExplosionEffect::AExplosionEffect()
 {
@@ -29,6 +30,16 @@ AExplosionEffect::AExplosionEffect()
 	BlastForce->Radius = 900.f;
 	BlastForce->ImpulseStrength = 1400.f;
 	BlastForce->DestructibleDamage = 0.f;
+
+	// Convention over configuration: author a Niagara system at this path and it is picked up
+	// automatically, switching off the placeholder with no wiring. See docs/NIAGARA_EXPLOSION.md.
+	// Absent, the finder quietly fails and the fallback stays in place.
+	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> DefaultExplosionFX(
+		TEXT("/Game/FX/NS_Explosion.NS_Explosion"));
+	if (DefaultExplosionFX.Succeeded())
+	{
+		ExplosionFX = DefaultExplosionFX.Object;
+	}
 }
 
 AExplosionEffect* AExplosionEffect::Spawn(UWorld* World, const FVector& Location, float InRadius, float Intensity)
