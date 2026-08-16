@@ -55,6 +55,79 @@ void AEnemyDroneTarget::BeginPlay()
 
 	CurrentPoint = (WorldRoute.Num() > 1) ? 1 : 0;
 	BobPhase = FMath::Fmod(GetActorLocation().X, 100.f) * 0.06f;   // desynchronise multiple UAVs
+
+	// Head off along whatever direction it was placed facing, so a hand-placed UAV flies the way
+	// it looks like it should.
+	ArcDirection = GetActorForwardVector().GetSafeNormal2D();
+	if (ArcDirection.IsNearlyZero())
+	{
+		ArcDirection = FVector::ForwardVector;
+	}
+	BeginNewArc(GetActorLocation());
+
+	// Start partway along so several UAVs are not all at the same point in their arcs.
+	ArcProgress = FMath::FRand();
+}
+
+void AEnemyDroneTarget::BeginNewArc(const FVector& FromLocation)
+{
+	ArcStart = FromLocation;
+	ArcStart.Z = FMath::Max(ArcStart.Z, MinimumAltitude);
+
+	// Turn by a modest amount rather than picking a fresh heading. Large changes between arcs
+	// destroy the predictability that makes the pattern interceptable.
+	const float TurnDegrees = FMath::FRandRange(-ArcTurnVariance, ArcTurnVariance);
+	ArcDirection = ArcDirection.RotateAngleAxis(TurnDegrees, FVector::UpVector).GetSafeNormal2D();
+
+	CurrentArcHeight = ArcHeight * FMath::FRandRange(0.75f, 1.3f);
+
+	// Duration from speed, so arc length and speed stay independent of each other.
+	const float Speed = bEvading ? EvadeSpeed : PatrolSpeed;
+	ArcDuration = FMath::Max(ArcLength / FMath::Max(Speed, 1.f), 0.5f);
+
+	ArcProgress = 0.f;
+}
+
+void AEnemyDroneTarget::TickParabolicFlight(float DeltaSeconds)
+{
+	ArcProgress += DeltaSeconds / FMath::Max(ArcDuration, KINDA_SMALL_NUMBER);
+
+	if (ArcProgress >= 1.f)
+	{
+		// The next arc starts exactly where this one finished, so the path never jumps.
+		BeginNewArc(GetActorLocation());
+	}
+
+	const float T = FMath::Clamp(ArcProgress, 0.f, 1.f);
+
+	// Standard parabola peaking at the midpoint: 4h * t * (1 - t).
+	const float ArcHeightNow = 4.f * CurrentArcHeight * T * (1.f - T);
+	const float Along = ArcLength * T;
+
+	const FVector Previous = GetActorLocation();
+	FVector NewLocation = ArcStart + ArcDirection * Along;
+	NewLocation.Z = ArcStart.Z + ArcHeightNow;
+
+	// Pushed wider and higher while hunted, rather than made to jink.
+	if (bEvading)
+	{
+		NewLocation.Z += CurrentArcHeight * 0.35f;
+	}
+
+	SetActorLocation(NewLocation, false);
+	Velocity = (NewLocation - Previous) / FMath::Max(DeltaSeconds, KINDA_SMALL_NUMBER);
+
+	// Face along the tangent of the curve, which gives nose-up on the climb and nose-down on
+	// the descent for free -- the thing that actually makes an arc look flown rather than slid.
+	const FVector Tangent = (ArcDirection * ArcLength
+		+ FVector::UpVector * (4.f * CurrentArcHeight * (1.f - 2.f * T))).GetSafeNormal();
+
+	if (!Tangent.IsNearlyZero())
+	{
+		const FRotator Facing = Tangent.Rotation();
+		const float Bank = FMath::Clamp(-Tangent.Z * 40.f, -25.f, 25.f);
+		SetActorRotation(FRotator(Facing.Pitch, Facing.Yaw, Bank));
+	}
 }
 
 FVector AEnemyDroneTarget::ComputePatrolDirection(const FVector& Location) const
@@ -102,6 +175,24 @@ void AEnemyDroneTarget::Tick(float DeltaSeconds)
 	{
 		ThreatLocation = Player->GetActorLocation();
 		bEvading = FVector::DistSquared(ThreatLocation, Location) < FMath::Square(DetectionRadius);
+	}
+
+	if (bParabolicFlight)
+	{
+		TickParabolicFlight(DeltaSeconds);
+		return;
+	}
+
+	TickRoutePatrol(DeltaSeconds);
+}
+
+void AEnemyDroneTarget::TickRoutePatrol(float DeltaSeconds)
+{
+	const FVector Location = GetActorLocation();
+	FVector ThreatLocation = FVector::ZeroVector;
+	if (const APawn* Player = UGameplayStatics::GetPlayerPawn(GetWorld(), 0))
+	{
+		ThreatLocation = Player->GetActorLocation();
 	}
 
 	FVector DesiredDirection;

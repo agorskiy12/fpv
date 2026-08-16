@@ -218,16 +218,16 @@ namespace
 		// The transport heli orbits the runway, so the scene has a centre instead of a target
 		// scattered off in empty ground. Spawned well clear of the player start -- it is large,
 		// and starting inside it would be indistinguishable from a broken game.
-		SpawnTarget(AHelicopterTarget::StaticClass(), RunwayCentre + FVector(0.f, 0.f, 6000.f), FRotator(0.f, 45.f, 0.f),
-			[RunwayLength](ADroneTarget* T)
+		SpawnTarget(AHelicopterTarget::StaticClass(), RunwayCentre + FVector(0.f, 0.f, 2200.f), FRotator(0.f, 45.f, 0.f),
+			[RunwayWidth](ADroneTarget* T)
 			{
 				if (AHelicopterTarget* H = Cast<AHelicopterTarget>(T))
 				{
 					H->bOrbit = true;
-					// Wide enough to clear the runway, so it crosses the deck rather than
-					// circling one end of it.
-					H->OrbitRadius = FMath::Max(RunwayLength * 0.6f, 12000.f);
-					H->OrbitAltitude = 5500.f;
+					// Sized to the runway's width rather than its length, so it works the deck
+					// instead of touring the whole airfield. Low and slow enough to be caught.
+					H->OrbitRadius = FMath::Max(RunwayWidth * 0.8f, 7000.f);
+					H->OrbitAltitude = 2000.f;
 				}
 			});
 

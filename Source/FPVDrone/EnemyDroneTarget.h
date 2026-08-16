@@ -23,7 +23,37 @@ public:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
 
-	/** Patrol route in actor-local space, flown in order and looped. */
+	/**
+	 * Fly chained parabolic arcs instead of a waypoint circuit.
+	 *
+	 * Waypoint patrols spend most of their time turning, which reads as indecision and makes
+	 * the drone hard to lead. A ballistic arc is the opposite: long, smooth, and completely
+	 * predictable once you have watched one, so intercepting it becomes a matter of judging
+	 * the curve rather than reacting to a direction change.
+	 *
+	 * Each arc begins where the last one ended, turned by a modest angle, so the path is
+	 * continuous and never snaps.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Drone|Arc")
+	bool bParabolicFlight = true;
+
+	/** Horizontal distance covered by one arc, centimetres. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Drone|Arc")
+	float ArcLength = 9000.f;
+
+	/** Height gained at the apex, above the arc's start. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Drone|Arc")
+	float ArcHeight = 1800.f;
+
+	/** Maximum heading change between consecutive arcs, degrees. Small keeps the path readable. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Drone|Arc")
+	float ArcTurnVariance = 32.f;
+
+	/** Altitude the arcs are anchored to; the drone never descends below this. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Drone|Arc")
+	float MinimumAltitude = 800.f;
+
+	/** Patrol route in actor-local space. Used only when bParabolicFlight is false. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Drone")
 	TArray<FVector> RoutePoints;
 
@@ -63,6 +93,17 @@ private:
 
 	FVector Velocity = FVector::ZeroVector;
 	float BobPhase = 0.f;
+
+	// Arc state
+	FVector ArcStart = FVector::ZeroVector;
+	FVector ArcDirection = FVector::ForwardVector;
+	float ArcProgress = 0.f;
+	float ArcDuration = 6.f;
+	float CurrentArcHeight = 1800.f;
+
+	void BeginNewArc(const FVector& FromLocation);
+	void TickParabolicFlight(float DeltaSeconds);
+	void TickRoutePatrol(float DeltaSeconds);
 
 	FVector ComputePatrolDirection(const FVector& Location) const;
 	FVector ComputeEvadeDirection(const FVector& Location, const FVector& ThreatLocation) const;

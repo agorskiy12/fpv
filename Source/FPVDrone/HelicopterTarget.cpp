@@ -42,6 +42,20 @@ AHelicopterTarget::AHelicopterTarget()
 		BodyMesh = HeliMesh.Object;
 	}
 
+	// Low and slow. A transport working an airfield loiters at walking-pace groundspeed a few
+	// tens of metres up -- and at that height it is genuinely reachable, which makes it a target
+	// rather than a distant decoration. It is also the one thing in the scene big enough to read
+	// clearly at low altitude.
+	CruiseSpeed = 550.f;
+	RunSpeed = 1100.f;
+	OrbitRadius = 11000.f;
+	OrbitAltitude = 2200.f;
+	MaxBankDegrees = 12.f;      // gentle, at this speed it is barely leaning
+	CruisePitchDegrees = -3.f;
+	FleeClimbRate = 160.f;      // still climbs when hunted, but slowly enough to be caught
+	BobAmplitude = 55.f;        // more visible hover wobble at low speed
+	BobFrequency = 0.7f;
+
 	// A wide circuit -- it should be crossing the map, not orbiting one spot.
 	RoutePoints = {
 		FVector(0.f, 0.f, 0.f),
