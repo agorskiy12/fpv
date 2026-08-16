@@ -266,10 +266,14 @@ void AFPVDronePawn::Detonate()
 
 	AExplosionEffect::Spawn(GetWorld(), BlastOrigin, BlastRadius, 1.2f);
 
+	// Heading at impact, so the kill cam can set up side-on to the run rather than behind it.
+	const FVector Approach = DroneMesh ? DroneMesh->GetPhysicsLinearVelocity().GetSafeNormal()
+									   : GetActorForwardVector();
+
 	if (AFPVWarGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AFPVWarGameMode>() : nullptr)
 	{
-		GameMode->ApplyBlast(BlastOrigin, BlastRadius, BlastDamage, this);
-		GameMode->NotifyDroneExpended(this);
+		// The game mode applies the blast itself so it can attribute kills to this strike.
+		GameMode->NotifyDroneDetonated(this, BlastOrigin, Approach, BlastRadius, BlastDamage);
 	}
 
 	UE_LOG(LogFPV, Log, TEXT("Warhead detonated at %s"), *BlastOrigin.ToCompactString());

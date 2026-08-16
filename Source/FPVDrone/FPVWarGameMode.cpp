@@ -5,6 +5,7 @@
 #include "FPVDronePawn.h"
 #include "FPVHUD.h"
 #include "HelicopterTarget.h"
+#include "StrikeCamera.h"
 #include "VehicleTarget.h"
 
 #include "Engine/World.h"
@@ -129,6 +130,10 @@ AFPVWarGameMode::AFPVWarGameMode()
 {
 	DefaultPawnClass = AFPVDronePawn::StaticClass();
 	HUDClass = AFPVHUD::StaticClass();
+
+	// Ticks to drive the post-strike sequence.
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = true;
 }
 
 void AFPVWarGameMode::BeginPlay()
@@ -238,6 +243,16 @@ void AFPVWarGameMode::NotifyTargetDestroyed(ADroneTarget* Target, AActor* /*Kill
 	Score += Target->ScoreValue;
 	++TargetsDestroyed;
 
+	if (bRecordingStrike)
+	{
+		FStrikeKill Kill;
+		Kill.TargetName = Target->GetDisplayName();
+		Kill.Score = Target->ScoreValue;
+		Kill.bSecondary = bPrimaryBlastResolved;
+		StrikeKills.Add(Kill);
+		StrikeScore += Target->ScoreValue;
+	}
+
 	if (GetPrimaryTargetsRemaining() == 0 && !bMissionComplete)
 	{
 		bMissionComplete = true;
@@ -249,35 +264,143 @@ void AFPVWarGameMode::NotifyTargetDestroyed(ADroneTarget* Target, AActor* /*Kill
 // Drone supply
 // ---------------------------------------------------------------------------------------------
 
-void AFPVWarGameMode::NotifyDroneExpended(AFPVDronePawn* /*Drone*/)
+void AFPVWarGameMode::NotifyDroneDetonated(AFPVDronePawn* Drone, const FVector& BlastLocation,
+	const FVector& ApproachDirection, float BlastRadius, float BlastDamage)
 {
-	if (bRespawnPending)
+	if (StrikeState != EStrikeState::Flying)
 	{
-		return;   // one detonation can touch several triggers in a frame
+		return;   // already mid-sequence; a second trigger in the same frame changes nothing
 	}
+
+	// Record everything this warhead is responsible for. Chain reactions resolve synchronously
+	// inside ApplyBlast, so the whole causal chain lands inside this window.
+	StrikeKills.Reset();
+	StrikeScore = 0;
+	bRecordingStrike = true;
+	bPrimaryBlastResolved = false;
+
+	ApplyBlast(BlastLocation, BlastRadius, BlastDamage, Drone);
+
+	// Anything destroyed from here on is a knock-on effect rather than the warhead itself.
+	bPrimaryBlastResolved = true;
+	bRecordingStrike = false;
 
 	if (DronesRemaining > 0)
 	{
 		--DronesRemaining;
 	}
 
-	if (DronesRemaining == 0)
+	ActiveStrikeCamera = AStrikeCamera::Spawn(GetWorld(), BlastLocation, ApproachDirection, BlastRadius);
+
+	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
 	{
-		UE_LOG(LogFPV, Log, TEXT("Out of drones. Score %d."), Score);
+		if (ActiveStrikeCamera)
+		{
+			// Short blend so the cut registers as a deliberate change of view rather than a
+			// glitch, without making the player wait to see the blast.
+			PC->SetViewTargetWithBlend(ActiveStrikeCamera, 0.25f);
+		}
+	}
+
+	EnterStrikeState(EStrikeState::KillCam, KillCamDuration);
+
+	UE_LOG(LogFPV, Log, TEXT("Strike: %d kill(s), %d points."), StrikeKills.Num(), StrikeScore);
+}
+
+void AFPVWarGameMode::EnterStrikeState(EStrikeState NewState, float Duration)
+{
+	StrikeState = NewState;
+	PhaseEndTime = GetWorld()->GetTimeSeconds() + Duration;
+}
+
+bool AFPVWarGameMode::WantsToSkipStrikeSequence() const
+{
+	const APlayerController* PC = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	if (!PC)
+	{
+		return false;
+	}
+
+	// Deliberately not SpaceBar, which the calibration wizard uses.
+	return PC->WasInputKeyJustPressed(EKeys::R)
+		|| PC->WasInputKeyJustPressed(EKeys::F)
+		|| PC->WasInputKeyJustPressed(EKeys::Enter)
+		|| PC->WasInputKeyJustPressed(EKeys::LeftMouseButton)
+		|| PC->WasInputKeyJustPressed(EKeys::Gamepad_FaceButton_Bottom);
+}
+
+void AFPVWarGameMode::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	if (StrikeState == EStrikeState::Flying)
+	{
 		return;
 	}
 
-	bRespawnPending = true;
-	RespawnAtTime = GetWorld()->GetTimeSeconds() + RespawnDelay;
+	const bool bPhaseOver = GetWorld()->GetTimeSeconds() >= PhaseEndTime;
+	const bool bSkip = WantsToSkipStrikeSequence();
 
-	GetWorld()->GetTimerManager().SetTimer(
-		RespawnTimer, this, &AFPVWarGameMode::RespawnDrone, RespawnDelay, false);
+	switch (StrikeState)
+	{
+	case EStrikeState::KillCam:
+		if (bPhaseOver || bSkip)
+		{
+			EnterStrikeState(EStrikeState::Report, ReportDuration);
+		}
+		break;
+
+	case EStrikeState::Report:
+		if (bPhaseOver || bSkip)
+		{
+			// Out of drones ends the run rather than looping it.
+			if (DronesRemaining == 0)
+			{
+				StrikeState = EStrikeState::Flying;
+				UE_LOG(LogFPV, Log, TEXT("Out of drones. Score %d."), Score);
+			}
+			else
+			{
+				EnterStrikeState(EStrikeState::Respawning, 0.35f);
+				FinishStrikeSequence();
+			}
+		}
+		break;
+
+	case EStrikeState::Respawning:
+		if (bPhaseOver)
+		{
+			StrikeState = EStrikeState::Flying;
+		}
+		break;
+
+	default:
+		break;
+	}
+}
+
+void AFPVWarGameMode::FinishStrikeSequence()
+{
+	RespawnDrone();
+
+	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
+	{
+		if (APawn* Pawn = PC->GetPawn())
+		{
+			PC->SetViewTargetWithBlend(Pawn, 0.3f);
+		}
+	}
+
+	if (ActiveStrikeCamera)
+	{
+		// Outlive the blend, or the view snaps as the camera is torn out from under it.
+		ActiveStrikeCamera->SetLifeSpan(0.6f);
+		ActiveStrikeCamera = nullptr;
+	}
 }
 
 void AFPVWarGameMode::RespawnDrone()
 {
-	bRespawnPending = false;
-
 	// The pawn is reused rather than respawned: it keeps the possession, camera and input
 	// bindings intact, which matters because input setup is built in C++ at runtime.
 	if (APlayerController* PC = GetWorld()->GetFirstPlayerController())
@@ -292,11 +415,8 @@ void AFPVWarGameMode::RespawnDrone()
 
 float AFPVWarGameMode::GetRespawnCountdown() const
 {
-	if (!bRespawnPending)
-	{
-		return 0.f;
-	}
-	return FMath::Max(0.f, RespawnAtTime - GetWorld()->GetTimeSeconds());
+	// The strike sequence owns the wait now, and it shows its own progress.
+	return 0.f;
 }
 
 // ---------------------------------------------------------------------------------------------

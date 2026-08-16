@@ -192,6 +192,13 @@ void AFPVHUD::DrawHUD()
 		DrawChannelMonitor();
 	}
 
+	// During the strike sequence the flight HUD is meaningless -- the drone is gone and the view
+	// is a third-person camera -- so it is replaced entirely rather than drawn over.
+	if (DrawStrikeReport())
+	{
+		return;
+	}
+
 	const AFPVDronePawn* Drone = Cast<AFPVDronePawn>(GetOwningPawn());
 	if (!Drone)
 	{
@@ -334,6 +341,99 @@ void AFPVHUD::DrawWarheadStatus(const AFPVDronePawn* Drone)
 		DrawText(TEXT("climb to arm"),
 			FLinearColor(1.f, 1.f, 1.f, 0.45f), X, Y + 24.f, GEngine->GetSmallFont(), 1.f);
 	}
+}
+
+bool AFPVHUD::DrawStrikeReport()
+{
+	const AFPVWarGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AFPVWarGameMode>() : nullptr;
+	if (!GameMode || GameMode->GetStrikeState() == EStrikeState::Flying)
+	{
+		return false;
+	}
+
+	UFont* TitleFont = GEngine->GetMediumFont();
+	UFont* Font = GEngine->GetMediumFont();
+	UFont* SmallFont = GEngine->GetSmallFont();
+
+	// Letterbox. Cheap, and it reads immediately as "this is a cutaway, not gameplay".
+	const float BarHeight = Canvas->SizeY * 0.11f;
+	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.85f), 0.f, 0.f, Canvas->SizeX, BarHeight);
+	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.85f), 0.f, Canvas->SizeY - BarHeight, Canvas->SizeX, BarHeight);
+
+	// The kill cam runs with no text at all, so the explosion is watched rather than read over.
+	if (GameMode->GetStrikeState() == EStrikeState::KillCam)
+	{
+		DrawText(TEXT("IMPACT"), FLinearColor(1.f, 0.4f, 0.25f, 1.f),
+			Canvas->SizeX * 0.5f - 46.f, BarHeight * 0.42f, TitleFont, 1.f);
+		return true;
+	}
+
+	const TArray<FStrikeKill>& Kills = GameMode->GetStrikeKills();
+
+	const float PanelW = 460.f;
+	const float RowHeight = 28.f;
+	const float HeaderHeight = 64.f;
+	const float PanelH = HeaderHeight + FMath::Max(Kills.Num(), 1) * RowHeight + 62.f;
+	const float PanelX = (Canvas->SizeX - PanelW) * 0.5f;
+	const float PanelY = (Canvas->SizeY - PanelH) * 0.5f;
+
+	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.82f), PanelX, PanelY, PanelW, PanelH);
+	DrawLine(PanelX, PanelY, PanelX + PanelW, PanelY, AccentColor, 2.f);
+
+	DrawText(TEXT("STRIKE REPORT"), AccentColor, PanelX + 20.f, PanelY + 16.f, TitleFont, 1.f);
+
+	float RowY = PanelY + HeaderHeight;
+
+	if (Kills.Num() == 0)
+	{
+		// Named plainly. A miss should be as clear as a hit.
+		DrawText(TEXT("NO TARGETS DESTROYED"), FLinearColor(1.f, 0.55f, 0.3f, 1.f),
+			PanelX + 20.f, RowY, Font, 1.f);
+		RowY += RowHeight;
+	}
+	else
+	{
+		for (const FStrikeKill& Kill : Kills)
+		{
+			const FLinearColor RowColor = Kill.bSecondary
+				? FLinearColor(1.f, 0.78f, 0.35f, 1.f)   // chain reactions earn their own colour
+				: TextColor;
+
+			DrawText(Kill.TargetName, RowColor, PanelX + 20.f, RowY, Font, 1.f);
+
+			if (Kill.bSecondary)
+			{
+				DrawText(TEXT("secondary"), FLinearColor(1.f, 1.f, 1.f, 0.45f),
+					PanelX + 190.f, RowY + 3.f, SmallFont, 1.f);
+			}
+
+			DrawText(FString::Printf(TEXT("+%d"), Kill.Score), RowColor,
+				PanelX + PanelW - 90.f, RowY, Font, 1.f);
+
+			RowY += RowHeight;
+		}
+	}
+
+	RowY += 10.f;
+	DrawLine(PanelX + 20.f, RowY, PanelX + PanelW - 20.f, RowY, FLinearColor(1.f, 1.f, 1.f, 0.25f), 1.f);
+	RowY += 10.f;
+
+	DrawText(TEXT("STRIKE TOTAL"), TextColor, PanelX + 20.f, RowY, Font, 1.f);
+	DrawText(FString::Printf(TEXT("%d"), GameMode->GetStrikeScore()), AccentColor,
+		PanelX + PanelW - 90.f, RowY, Font, 1.f);
+
+	const int32 Drones = GameMode->GetDronesRemaining();
+	const FString DroneLine = (Drones < 0)
+		? FString(TEXT("NEW DRONE INBOUND"))
+		: FString::Printf(TEXT("DRONES REMAINING  %d"), Drones);
+
+	DrawText(DroneLine, FLinearColor(1.f, 1.f, 1.f, 0.55f),
+		PanelX + 20.f, PanelY + PanelH - 26.f, SmallFont, 1.f);
+
+	DrawText(TEXT("R / F to continue"), FLinearColor(1.f, 1.f, 1.f, 0.4f),
+		PanelX + PanelW - 150.f, PanelY + PanelH - 26.f, SmallFont, 1.f);
+
+	return true;
 }
 
 void AFPVHUD::DrawTargetMarkers()

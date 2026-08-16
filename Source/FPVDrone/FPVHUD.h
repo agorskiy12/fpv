@@ -40,6 +40,9 @@ private:
 	/** Warhead state and the detonate prompt. */
 	void DrawWarheadStatus(const class AFPVDronePawn* Drone);
 
+	/** After-action report shown over the kill cam. Returns true when the sequence is running. */
+	bool DrawStrikeReport();
+
 	/** Debug overlay for bringing up an RC transmitter. Toggle with the fpv.ShowChannels console variable. */
 	void DrawChannelMonitor();
 

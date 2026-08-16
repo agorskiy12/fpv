@@ -6,6 +6,41 @@
 
 class ADroneTarget;
 class AFPVDronePawn;
+class AStrikeCamera;
+
+/** One target killed by a single strike, captured for the after-action report. */
+USTRUCT(BlueprintType)
+struct FStrikeKill
+{
+	GENERATED_BODY()
+
+	UPROPERTY(BlueprintReadOnly, Category = "Strike")
+	FString TargetName;
+
+	UPROPERTY(BlueprintReadOnly, Category = "Strike")
+	int32 Score = 0;
+
+	/** True when the kill came from a chain reaction rather than the drone's own warhead. */
+	UPROPERTY(BlueprintReadOnly, Category = "Strike")
+	bool bSecondary = false;
+};
+
+/** Where the post-detonation sequence has got to. */
+UENUM(BlueprintType)
+enum class EStrikeState : uint8
+{
+	/** Normal flight. */
+	Flying,
+
+	/** Third-person camera on the blast, no text yet. */
+	KillCam,
+
+	/** Camera still running, after-action report on screen. */
+	Report,
+
+	/** Blending back to a fresh drone. */
+	Respawning
+};
 
 /**
  * Mission director for a strike sortie.
@@ -23,6 +58,7 @@ public:
 	AFPVWarGameMode();
 
 	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
 
 	// --- Blast ------------------------------------------------------------------------------
 
@@ -44,8 +80,43 @@ public:
 	 */
 	void RegisterTarget(ADroneTarget* Target);
 
-	/** Called by the pawn when its warhead goes off. Consumes a drone and queues a respawn. */
-	void NotifyDroneExpended(AFPVDronePawn* Drone);
+	/**
+	 * Called by the pawn when its warhead goes off. Runs the whole strike sequence: applies the
+	 * blast while recording what it killed, cuts to a third-person camera, shows the report, and
+	 * only then issues a fresh drone.
+	 *
+	 * The blast is applied from here rather than by the pawn so kills can be attributed to this
+	 * specific strike -- chain reactions resolve synchronously inside ApplyBlast, so everything
+	 * this warhead was responsible for lands inside the recording window.
+	 */
+	void NotifyDroneDetonated(AFPVDronePawn* Drone, const FVector& BlastLocation, const FVector& ApproachDirection,
+		float BlastRadius, float BlastDamage);
+
+	// --- Strike sequence --------------------------------------------------------------------
+
+	UFUNCTION(BlueprintPure, Category = "Strike")
+	EStrikeState GetStrikeState() const { return StrikeState; }
+
+	UFUNCTION(BlueprintPure, Category = "Strike")
+	bool IsShowingStrikeReport() const { return StrikeState == EStrikeState::Report; }
+
+	/** What the last strike destroyed. */
+	const TArray<FStrikeKill>& GetStrikeKills() const { return StrikeKills; }
+
+	UFUNCTION(BlueprintPure, Category = "Strike")
+	int32 GetStrikeScore() const { return StrikeScore; }
+
+	/** Seconds left in the current phase, for a progress cue. */
+	UFUNCTION(BlueprintPure, Category = "Strike")
+	float GetStrikePhaseRemaining() const { return FMath::Max(0.f, PhaseEndTime - GetWorld()->GetTimeSeconds()); }
+
+	/** How long the camera runs before the report appears. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Strike")
+	float KillCamDuration = 2.2f;
+
+	/** How long the report stays up before a new drone is issued. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "Strike")
+	float ReportDuration = 3.4f;
 
 	// --- Mission state ----------------------------------------------------------------------
 
@@ -96,14 +167,29 @@ protected:
 
 private:
 	void RespawnDrone();
+	void EnterStrikeState(EStrikeState NewState, float Duration);
+	void FinishStrikeSequence();
+
+	/** True while a skip key is held, so the sequence can be cut short. */
+	bool WantsToSkipStrikeSequence() const;
 
 	int32 Score = 0;
 	int32 TargetsDestroyed = 0;
 	int32 DronesRemaining = -1;
 	bool bMissionComplete = false;
 
-	float RespawnAtTime = 0.f;
-	bool bRespawnPending = false;
+	// Strike sequence
+	EStrikeState StrikeState = EStrikeState::Flying;
+	float PhaseEndTime = 0.f;
+	TArray<FStrikeKill> StrikeKills;
+	int32 StrikeScore = 0;
 
-	FTimerHandle RespawnTimer;
+	/** Set while a blast is resolving, so destroyed targets attribute to the current strike. */
+	bool bRecordingStrike = false;
+
+	/** True once the drone's own blast has resolved, marking later kills as chain reactions. */
+	bool bPrimaryBlastResolved = false;
+
+	UPROPERTY(Transient)
+	TObjectPtr<AStrikeCamera> ActiveStrikeCamera;
 };
