@@ -111,8 +111,9 @@ namespace
 				}
 			});
 
-		// The transport heli, high and crossing. Deliberately the furthest thing out.
-		SpawnTarget(AHelicopterTarget::StaticClass(), Origin + FVector(-8000.f, -8000.f, 4500.f), FRotator(0.f, 45.f, 0.f),
+		// The transport heli, high and well clear. Kept far out deliberately: it is large, and
+		// spawning anything large near the player start risks the drone starting inside it.
+		SpawnTarget(AHelicopterTarget::StaticClass(), Origin + FVector(-20000.f, -20000.f, 9000.f), FRotator(0.f, 45.f, 0.f),
 			[](ADroneTarget* T) {});
 
 		UE_LOG(LogFPV, Log, TEXT("Spawned test targets around %s"), *Origin.ToCompactString());

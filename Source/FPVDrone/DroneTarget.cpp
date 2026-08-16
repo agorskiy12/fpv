@@ -53,6 +53,19 @@ void ADroneTarget::BeginPlay()
 	{
 		GameMode->RegisterTarget(this);
 	}
+
+	// Imported meshes arrive at wildly different scales depending on how they were authored, and
+	// a mesh hundreds of metres across is indistinguishable from a broken game when you are
+	// inside it. Report the real extent so it can be checked rather than guessed at.
+	if (BodyMesh && OverrideMesh)
+	{
+		const FVector MeshExtent = OverrideMesh->Bounds.BoxExtent * 2.f;
+		UE_LOG(LogFPV, Log, TEXT("%s mesh '%s' actual size %.0f x %.0f x %.0f cm (BodySize says %.0f x %.0f x %.0f) at %s"),
+			*GetDisplayName(), *BodyMesh->GetName(),
+			MeshExtent.X, MeshExtent.Y, MeshExtent.Z,
+			BodySize.X, BodySize.Y, BodySize.Z,
+			*GetActorLocation().ToCompactString());
+	}
 }
 
 // ---------------------------------------------------------------------------------------------
