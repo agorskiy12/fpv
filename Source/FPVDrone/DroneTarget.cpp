@@ -42,6 +42,11 @@ void ADroneTarget::BeginPlay()
 	Super::BeginPlay();
 	Health = MaxHealth;
 	RebuildBody();
+
+	if (AFPVWarGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AFPVWarGameMode>() : nullptr)
+	{
+		GameMode->RegisterTarget(this);
+	}
 }
 
 // ---------------------------------------------------------------------------------------------

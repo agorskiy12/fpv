@@ -36,6 +36,14 @@ public:
 	/** Called by a target as it dies. */
 	void NotifyTargetDestroyed(ADroneTarget* Target, AActor* Killer);
 
+	/**
+	 * Add a target to the mission.
+	 *
+	 * Targets register themselves on BeginPlay rather than only being swept up by the game
+	 * mode at level start, so anything spawned at runtime still counts toward objectives.
+	 */
+	void RegisterTarget(ADroneTarget* Target);
+
 	/** Called by the pawn when its warhead goes off. Consumes a drone and queues a respawn. */
 	void NotifyDroneExpended(AFPVDronePawn* Drone);
 
