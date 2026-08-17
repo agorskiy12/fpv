@@ -253,6 +253,44 @@ void ADroneTarget::ApplyBlastDamage(float Damage, const FVector& BlastOrigin, AA
 	}
 }
 
+void ADroneTarget::StickToGround(float MaxStep)
+{
+	UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	FVector BoundsOrigin, BoundsExtent;
+	GetActorBounds(/*bOnlyCollidingComponents=*/false, BoundsOrigin, BoundsExtent);
+
+	const float BaseZ = BoundsOrigin.Z - BoundsExtent.Z;
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(StickToGround), /*bTraceComplex=*/true);
+	Params.AddIgnoredActor(this);
+
+	// Started above the base rather than at it, so a unit that has sunk slightly into a rise
+	// still finds the surface it should be standing on.
+	FHitResult Hit;
+	if (!World->LineTraceSingleByChannel(Hit,
+		FVector(BoundsOrigin.X, BoundsOrigin.Y, BaseZ + MaxStep),
+		FVector(BoundsOrigin.X, BoundsOrigin.Y, BaseZ - MaxStep),
+		ECC_Visibility, Params))
+	{
+		return;
+	}
+
+	const float Correction = Hit.ImpactPoint.Z - BaseZ;
+	if (FMath::Abs(Correction) < 1.f)
+	{
+		return;
+	}
+
+	// Not swept: the correction is vertical and the surface it is moving onto is precisely what
+	// the trace just hit, so a sweep would collide with the ground it is trying to stand on.
+	SetActorLocation(GetActorLocation() + FVector(0.f, 0.f, Correction), /*bSweep=*/false);
+}
+
 void ADroneTarget::OnDestroyed_Internal(AActor* Killer)
 {
 	const FVector Centre = GetAimPoint();

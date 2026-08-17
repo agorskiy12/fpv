@@ -297,6 +297,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Drone")
 	void ResetToStart();
 
+	/**
+	 * Move the point respawns return to, and that altitude is measured from.
+	 *
+	 * The spawn transform is captured at BeginPlay, which is before anything the game mode builds
+	 * exists. If the scene then raises the ground -- a runway deck, a landscape -- the recorded
+	 * point ends up underground, and every respawn puts the drone back inside it.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "Drone")
+	void SetSpawnTransform(const FTransform& InSpawnTransform) { SpawnTransform = InSpawnTransform; }
+
 	// ---------------------------------------------------------------------------------------
 	// Warhead
 	//

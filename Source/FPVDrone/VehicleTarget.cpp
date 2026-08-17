@@ -151,6 +151,9 @@ void AVehicleTarget::Tick(float DeltaSeconds)
 	// Drive along the facing direction rather than straight at the point, so the turn radius
 	// is visible instead of the vehicle crabbing sideways.
 	SetActorLocation(Location + GetActorForwardVector() * CurrentSpeed * DeltaSeconds, true);
+
+	// Follows the deck, and the ground either side of it if the route ever leaves the tarmac.
+	StickToGround();
 }
 
 void AVehicleTarget::OnDestroyed_Internal(AActor* Killer)

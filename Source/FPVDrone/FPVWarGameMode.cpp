@@ -170,6 +170,231 @@ namespace
 		return Result;
 	}
 
+	/**
+	 * Whether the level already has ground of its own.
+	 *
+	 * Spawning the placeholder slab into a level that already has a Landscape puts a floor
+	 * *underneath* the terrain, and the player lands on the slab -- inside the hill, under the
+	 * world. Detected by sampling rather than by asking for a Landscape specifically, so any
+	 * source of ground counts.
+	 */
+	bool HasExistingGround(UWorld* World, const FVector& Origin)
+	{
+		constexpr int32 SampleCount = 12;
+		constexpr float SampleSpread = 60000.f;
+
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(GroundProbe), /*bTraceComplex=*/false);
+
+		int32 Hits = 0;
+		for (int32 Index = 0; Index < SampleCount; ++Index)
+		{
+			const float Angle = (2.f * PI * Index) / SampleCount;
+			const FVector At = Origin + FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * SampleSpread;
+
+			FHitResult Hit;
+			if (World->LineTraceSingleByChannel(Hit, At + FVector(0.f, 0.f, 200000.f),
+				At - FVector(0.f, 0.f, 200000.f), ECC_Visibility, Params))
+			{
+				++Hits;
+			}
+		}
+
+		// A clear majority, so a stray building or the template's small starter floor does not
+		// count as ground cover across the whole play area.
+		const bool bHasGround = Hits >= (SampleCount * 3) / 4;
+		UE_LOG(LogFPV, Log, TEXT("Ground probe: %d/%d samples hit -- %s"), Hits, SampleCount,
+			bHasGround ? TEXT("level has its own ground, skipping the slab") : TEXT("no ground, spawning the slab"));
+
+		return bHasGround;
+	}
+
+	/**
+	 * Sit every ground unit on the surface that is actually beneath it.
+	 *
+	 * Placement offsets are authored against a flat deck at a known height, which is fine only
+	 * while the ground is flat. Over a landscape the same offsets leave soldiers hovering in the
+	 * air on the low ground and buried to the waist on the high ground.
+	 *
+	 * Done as a pass over the finished scene rather than at each spawn site, so anything added
+	 * later is conformed too without having to remember to ask for it.
+	 */
+	void ConformSceneToGround(UWorld* World)
+	{
+		// Gathered first: the targets must not conform to each other, and a trace that starts
+		// above the scene would otherwise land on whatever is flying overhead.
+		TArray<AActor*> Targets;
+		TArray<AActor*> Airborne;
+
+		for (TActorIterator<ADroneTarget> It(World); It; ++It)
+		{
+			if (It->IsA<AEnemyDroneTarget>() || It->IsA<AHelicopterTarget>())
+			{
+				Airborne.Add(*It);   // these are meant to be in the air
+			}
+			else
+			{
+				Targets.Add(*It);
+			}
+		}
+
+		for (TActorIterator<ABannerMarker> It(World); It; ++It)
+		{
+			Targets.Add(*It);
+		}
+
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(ConformToGround), /*bTraceComplex=*/true);
+		Params.AddIgnoredActors(Targets);
+		Params.AddIgnoredActors(Airborne);
+		if (const APawn* Player = UGameplayStatics::GetPlayerPawn(World, 0))
+		{
+			Params.AddIgnoredActor(Player);
+		}
+
+		int32 Moved = 0;
+		float LargestCorrection = 0.f;
+
+		for (AActor* Target : Targets)
+		{
+			FVector BoundsOrigin, BoundsExtent;
+			Target->GetActorBounds(/*bOnlyCollidingComponents=*/false, BoundsOrigin, BoundsExtent);
+
+			FHitResult Hit;
+			if (!World->LineTraceSingleByChannel(Hit,
+				FVector(BoundsOrigin.X, BoundsOrigin.Y, BoundsOrigin.Z + 100000.f),
+				FVector(BoundsOrigin.X, BoundsOrigin.Y, BoundsOrigin.Z - 100000.f),
+				ECC_Visibility, Params))
+			{
+				continue;
+			}
+
+			// Measured from the base of the bounds, not the actor origin. A pivot can sit at the
+			// centre of a mesh or at its feet, and only the bounds say which.
+			const float BaseZ = BoundsOrigin.Z - BoundsExtent.Z;
+			const float Correction = Hit.ImpactPoint.Z - BaseZ;
+
+			if (FMath::Abs(Correction) < 1.f)
+			{
+				continue;
+			}
+
+			Target->SetActorLocation(Target->GetActorLocation() + FVector(0.f, 0.f, Correction), /*bSweep=*/false);
+			++Moved;
+			LargestCorrection = FMath::Max(LargestCorrection, FMath::Abs(Correction));
+		}
+
+		UE_LOG(LogFPV, Log, TEXT("Conformed %d/%d ground units to the surface (largest move %.0f cm), %d left airborne"),
+			Moved, Targets.Num(), LargestCorrection, Airborne.Num());
+	}
+
+	/**
+	 * Lift the player clear if they have ended up inside or under the terrain.
+	 *
+	 * The player start is authored against whatever the level looked like at the time, and the
+	 * scene built here can raise the ground beneath it -- a runway deck several metres up, or a
+	 * landscape that was always there. Either way the drone begins underground, which looks
+	 * exactly like a broken game.
+	 */
+	void EnsurePlayerAboveGround(UWorld* World)
+	{
+		APawn* Player = UGameplayStatics::GetPlayerPawn(World, 0);
+		if (!Player)
+		{
+			return;
+		}
+
+		const FVector Location = Player->GetActorLocation();
+
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(PlayerGround), /*bTraceComplex=*/true);
+		Params.AddIgnoredActor(Player);
+
+		// Traced from far overhead rather than from the pawn, so a pawn that is already buried
+		// still finds the surface above it instead of the one below.
+		FHitResult Hit;
+		if (!World->LineTraceSingleByChannel(Hit, FVector(Location.X, Location.Y, Location.Z + 200000.f),
+			FVector(Location.X, Location.Y, Location.Z - 200000.f), ECC_Visibility, Params))
+		{
+			return;
+		}
+
+		constexpr float Clearance = 250.f;
+		const float TargetZ = Hit.ImpactPoint.Z + Clearance;
+		if (Location.Z >= TargetZ)
+		{
+			return;
+		}
+
+		Player->SetActorLocation(FVector(Location.X, Location.Y, TargetZ), /*bSweep=*/false);
+
+		if (UPrimitiveComponent* Body = Cast<UPrimitiveComponent>(Player->GetRootComponent()))
+		{
+			// Any velocity accumulated while falling through the world would carry straight into
+			// the surface it was just lifted above.
+			if (Body->IsSimulatingPhysics())
+			{
+				Body->SetPhysicsLinearVelocity(FVector::ZeroVector);
+				Body->SetPhysicsAngularVelocityInDegrees(FVector::ZeroVector);
+			}
+		}
+
+		// Moved too, or the correction lasts exactly until the first respawn puts the drone back
+		// where it started. This is also the datum altitude is reported against.
+		if (AFPVDronePawn* Drone = Cast<AFPVDronePawn>(Player))
+		{
+			Drone->SetSpawnTransform(FTransform(Player->GetActorRotation(), Player->GetActorLocation()));
+		}
+
+		UE_LOG(LogFPV, Log, TEXT("Player was %.0f cm below the surface -- lifted to Z=%.0f"),
+			TargetZ - Location.Z, TargetZ);
+	}
+
+	/**
+	 * How far ground extends from a point, in centimetres.
+	 *
+	 * Scenery cannot be laid out against an assumed world size. A hand-authored level's landscape
+	 * may be one kilometre across or ten, and scattering past its edge simply drops everything
+	 * into the void -- which is how a full ring of background mountains can end up placing none
+	 * of itself while reporting success.
+	 */
+	float MeasureGroundRadius(UWorld* World, const FVector& Origin)
+	{
+		constexpr float MaxRadius = 600000.f;    // 6 km, past any sensible play area
+		constexpr int32 RadialSteps = 24;
+		constexpr int32 Bearings = 8;
+
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(GroundExtent), /*bTraceComplex=*/false);
+
+		float Reached = 0.f;
+		for (int32 Step = 1; Step <= RadialSteps; ++Step)
+		{
+			const float Radius = (MaxRadius * Step) / RadialSteps;
+
+			int32 Hits = 0;
+			for (int32 Bearing = 0; Bearing < Bearings; ++Bearing)
+			{
+				const float Angle = (2.f * PI * Bearing) / Bearings;
+				const FVector At = Origin + FVector(FMath::Cos(Angle), FMath::Sin(Angle), 0.f) * Radius;
+
+				FHitResult Hit;
+				if (World->LineTraceSingleByChannel(Hit, At + FVector(0.f, 0.f, 200000.f),
+					At - FVector(0.f, 0.f, 200000.f), ECC_Visibility, Params))
+				{
+					++Hits;
+				}
+			}
+
+			// Majority rather than all, so one gap or a non-square landscape does not stop the
+			// measurement short.
+			if (Hits * 2 < Bearings)
+			{
+				break;
+			}
+			Reached = Radius;
+		}
+
+		UE_LOG(LogFPV, Log, TEXT("Ground extends %.0f m from %s"), Reached / 100.f, *Origin.ToCompactString());
+		return Reached;
+	}
+
 	/** Loads a set of meshes by path, dropping any the content pack did not ship. */
 	TArray<UStaticMesh*> LoadMeshSet(const FString& Folder, const FString& Prefix, const TArray<FString>& Suffixes)
 	{
@@ -207,6 +432,15 @@ namespace
 
 		const FString Root = TEXT("/Game/MWLandscapeAutoMaterial/Meshes");
 
+		// Everything below is sized as a fraction of the ground that is actually underfoot, so the
+		// same layout works on a small hand-built level and on a six-kilometre landscape.
+		const float GroundRadius = MeasureGroundRadius(World, Centre);
+		if (GroundRadius < 20000.f)
+		{
+			UE_LOG(LogFPV, Warning, TEXT("Only %.0f m of ground -- skipping terrain scatter."), GroundRadius / 100.f);
+			return;
+		}
+
 		// The airfield is the one surface that must stay clear. Everything else -- flat slab or
 		// sculpted landscape -- is fair ground.
 		TArray<TWeakObjectPtr<AActor>> Airfield;
@@ -219,10 +453,12 @@ namespace
 		// scattered, and given no collision -- these are backdrop, not terrain you can hit.
 		FScatterLayer Mountains;
 		Mountains.Meshes = LoadMeshSet(Root / TEXT("Background"), TEXT("SM_MWAM_Mountain"), { TEXT("A"), TEXT("B") });
-		Mountains.InnerRadius = 190000.f;
-		Mountains.OuterRadius = 330000.f;
+		// Pushed right out to the boundary, which does double duty: it puts the skyline at the
+		// horizon and it stands exactly where the ground runs out, hiding the edge of the world.
+		Mountains.InnerRadius = GroundRadius * 0.78f;
+		Mountains.OuterRadius = GroundRadius * 0.97f;
 		Mountains.Count = 70;
-		Mountains.TargetSize = 62000.f;      // ~600 m, enough to read as terrain at 2-3 km
+		Mountains.TargetSize = FMath::Clamp(GroundRadius * 0.22f, 20000.f, 70000.f);
 		Mountains.ScaleVariance = 0.45f;
 		Mountains.MaxSlopeDegrees = 25.f;   // they are enormous; a tilted one reads as broken
 		Mountains.AvoidActors = Airfield;
@@ -235,7 +471,7 @@ namespace
 		Rocks.Meshes = LoadMeshSet(Root / TEXT("Cover"), TEXT("SM_MWAM_Stone"),
 			{ TEXT("A"), TEXT("B"), TEXT("C"), TEXT("D") });
 		Rocks.InnerRadius = 7000.f;
-		Rocks.OuterRadius = 160000.f;
+		Rocks.OuterRadius = GroundRadius * 0.74f;
 		Rocks.Count = 420;
 		Rocks.TargetSize = 320.f;
 		Rocks.ScaleVariance = 0.55f;
@@ -250,7 +486,7 @@ namespace
 		Scrub.Meshes = LoadMeshSet(Root / TEXT("Plants"), TEXT("SM_MWAM_Grass"),
 			{ TEXT("A"), TEXT("B"), TEXT("C"), TEXT("D") });
 		Scrub.InnerRadius = 5000.f;
-		Scrub.OuterRadius = 120000.f;
+		Scrub.OuterRadius = GroundRadius * 0.58f;
 		Scrub.Count = 1600;
 		Scrub.TargetSize = 150.f;
 		Scrub.ScaleVariance = 0.4f;
@@ -283,10 +519,10 @@ namespace
 		// further out floats over nothing and the sky shows through underneath -- which reads
 		// convincingly as water. A single large slab is enough to give the scene a floor.
 		//
-		// Skipped once the level has a real Landscape. The slab exists only so the scene is not
+		// Skipped once the level has ground of its own. The slab exists only so the scene is not
 		// floating in void; a Landscape supersedes it entirely, and landscape materials cannot be
 		// applied to a static mesh anyway.
-		if (CVarSpawnGroundPlane.GetValueOnGameThread() != 0)
+		if (CVarSpawnGroundPlane.GetValueOnGameThread() != 0 && !HasExistingGround(World, Origin))
 		{
 			if (UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")))
 			{
@@ -703,6 +939,10 @@ namespace
 					H->CentreDriftPeriod = 95.f;
 				}
 			});
+
+		// Last, once every surface that could be underfoot exists.
+		ConformSceneToGround(World);
+		EnsurePlayerAboveGround(World);
 
 		UE_LOG(LogFPV, Log, TEXT("Spawned test targets around %s"), *Origin.ToCompactString());
 	}

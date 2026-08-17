@@ -198,6 +198,18 @@ public:
 	float WreckImpactBlastDamage = 90.f;
 
 protected:
+	/**
+	 * Drop the actor onto the surface underneath it, keeping its base on the ground.
+	 *
+	 * Units move horizontally and never change height, which is correct only over a flat deck.
+	 * Anywhere else they walk out into thin air as the ground falls away, or sink into it as the
+	 * ground rises. Called each tick by anything that moves along the ground.
+	 *
+	 * MaxStep bounds how far a single correction may be, so a unit passing over a gap steps down
+	 * rather than dropping to whatever is at the bottom of it.
+	 */
+	void StickToGround(float MaxStep = 600.f);
+
 	/** Called once health reaches zero. Subclasses stop their movement here. */
 	virtual void OnDestroyed_Internal(AActor* Killer);
 

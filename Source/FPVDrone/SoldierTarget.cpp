@@ -283,6 +283,10 @@ void ASoldierTarget::Tick(float DeltaSeconds)
 
 	const float Speed = bAlerted ? RunSpeed : WalkSpeed;
 	SetActorLocation(Location + GetActorForwardVector() * Speed * DeltaSeconds, true);
+
+	// Infantry follow the ground rather than a fixed height, so a patrol crossing a rise stays
+	// on it instead of walking through the hill and out over the far side.
+	StickToGround();
 }
 
 void ASoldierTarget::OnDestroyed_Internal(AActor* Killer)
