@@ -163,6 +163,21 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Mission")
 	ADroneTarget* FindNearestLiveTarget(const FVector& FromLocation) const;
 
+	// --- Signal -------------------------------------------------------------------------------
+
+	/**
+	 * Strongest hostile operator signal sampled at a point, 0 to 1.
+	 *
+	 * Sampled at the drone's position rather than the operator's. Physically the receiver would
+	 * be at the antenna, but sampling there gives the player nothing to do -- taking the reading
+	 * from the aircraft is what turns searching into flying.
+	 */
+	UFUNCTION(BlueprintPure, Category = "Signal")
+	float GetHostileSignalStrengthAt(const FVector& SampleLocation, EFaction SensingFaction) const;
+
+	/** Every operator currently in the level, both sides. */
+	void GetOperators(TArray<class AOperatorTarget*>& OutOperators) const;
+
 	/** Every target still alive, for HUD listing. */
 	void GetLiveTargets(TArray<ADroneTarget*>& OutTargets) const;
 

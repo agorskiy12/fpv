@@ -80,6 +80,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Soldier|Visuals")
 	FRotator MeshFacingCorrection = FRotator(0.f, -90.f, 0.f);
 
+	/**
+	 * Draw a faction-coloured cube instead of the character model.
+	 *
+	 * On by default while identification is being designed. The eventual game identifies sides by
+	 * uniform markings, which is a skill; a coloured block is the opposite of that. But the
+	 * soldier pack shipped without textures, so the model currently reads as grey either way --
+	 * and until markings exist, unambiguous colour is what makes faction behaviour testable at
+	 * all.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Soldier|Visuals")
+	bool bUseFactionCube = true;
+
+	/** Colour of the placeholder. Overridden by subclasses that need to stand out. */
+	virtual FLinearColor GetPlaceholderColour() const;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Soldier")
 	bool bAlerted = false;
 
@@ -93,6 +108,11 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "Soldier")
 	TObjectPtr<USkeletalMeshComponent> SoldierMesh;
+
+	UPROPERTY(VisibleAnywhere, Category = "Soldier")
+	TObjectPtr<UStaticMeshComponent> PlaceholderCube;
+
+	void ApplyPlaceholderCube();
 
 	UPROPERTY(EditAnywhere, Category = "Soldier|Animation")
 	TObjectPtr<UAnimSequence> WalkAnimation;

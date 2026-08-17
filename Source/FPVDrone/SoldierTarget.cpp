@@ -3,9 +3,13 @@
 
 #include "Animation/AnimSequence.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/SkeletalMesh.h"
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 
 namespace
@@ -59,8 +63,85 @@ ASoldierTarget::ASoldierTarget()
 		RunAnimation = RunFinder.Object;
 	}
 
+	PlaceholderCube = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PlaceholderCube"));
+	PlaceholderCube->SetupAttachment(TargetRoot);
+	PlaceholderCube->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	PlaceholderCube->SetVisibility(false);
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
+	if (CubeMesh.Succeeded())
+	{
+		PlaceholderCube->SetStaticMesh(CubeMesh.Object);
+	}
+
 	// A short there-and-back, so a freshly placed soldier already walks a beat.
 	PatrolPoints = { FVector::ZeroVector, FVector(1600.f, 0.f, 0.f) };
+}
+
+FLinearColor ASoldierTarget::GetPlaceholderColour() const
+{
+	switch (Faction)
+	{
+	case EFaction::Russia: return FLinearColor(1.f, 0.05f, 0.05f);
+	case EFaction::NATO:   return FLinearColor(0.1f, 1.f, 0.15f);
+	default:               return FLinearColor(0.45f, 0.45f, 0.45f);   // civilians and scenery
+	}
+}
+
+void ASoldierTarget::ApplyPlaceholderCube()
+{
+	if (!PlaceholderCube || !bUseFactionCube)
+	{
+		return;
+	}
+
+	// Person-sized, standing on the ground rather than centred on it.
+	PlaceholderCube->SetRelativeScale3D(FVector(
+		BodySize.X / 100.f, BodySize.Y / 100.f, BodySize.Z / 100.f));
+	PlaceholderCube->SetRelativeLocation(FVector(0.f, 0.f, BodySize.Z * 0.5f));
+	PlaceholderCube->SetVisibility(true);
+
+	// The character model is hidden rather than removed, so turning the cube off restores it.
+	if (SoldierMesh)
+	{
+		SoldierMesh->SetVisibility(false);
+	}
+
+	UMaterialInterface* Source = LoadObject<UMaterialInterface>(
+		nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial"));
+	if (!Source)
+	{
+		return;
+	}
+
+	// Which parameter carries the colour varies between engine materials, so the names are
+	// logged once and every plausible one is set. Setting a parameter a material does not have
+	// is a silent no-op, so trying several costs nothing.
+	static bool bLoggedParameters = false;
+	if (!bLoggedParameters)
+	{
+		bLoggedParameters = true;
+		TArray<FMaterialParameterInfo> ParameterInfos;
+		TArray<FGuid> Guids;
+		Source->GetAllVectorParameterInfo(ParameterInfos, Guids);
+
+		FString Names;
+		for (const FMaterialParameterInfo& Info : ParameterInfos)
+		{
+			Names += Info.Name.ToString() + TEXT(" ");
+		}
+		UE_LOG(LogFPV, Log, TEXT("BasicShapeMaterial vector parameters: %s"),
+			Names.IsEmpty() ? TEXT("(none)") : *Names);
+	}
+
+	if (UMaterialInstanceDynamic* Dynamic = UMaterialInstanceDynamic::Create(Source, this))
+	{
+		const FLinearColor Colour = GetPlaceholderColour();
+		Dynamic->SetVectorParameterValue(TEXT("Color"), Colour);
+		Dynamic->SetVectorParameterValue(TEXT("BaseColor"), Colour);
+		Dynamic->SetVectorParameterValue(TEXT("Tint"), Colour);
+		PlaceholderCube->SetMaterial(0, Dynamic);
+	}
 }
 
 void ASoldierTarget::BeginPlay()
@@ -88,6 +169,8 @@ void ASoldierTarget::BeginPlay()
 				MeshHeight, StandingHeight);
 		}
 	}
+
+	ApplyPlaceholderCube();
 
 	WorldRoute.Reset();
 	const FTransform SpawnTransform = GetActorTransform();
@@ -216,6 +299,22 @@ void ASoldierTarget::OnDestroyed_Internal(AActor* Killer)
 void ASoldierTarget::CollapseIntoRagdoll(const FVector& BlastOrigin)
 {
 	SetActorTickEnabled(false);
+
+	// With the placeholder cube there is no skeleton to go limp, so it is thrown as a single
+	// rigid body instead. Cruder, but it still reads as a hit rather than a disappearance.
+	if (bUseFactionCube && PlaceholderCube && PlaceholderCube->IsVisible())
+	{
+		PlaceholderCube->SetCollisionProfileName(TEXT("PhysicsActor"));
+		PlaceholderCube->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+		PlaceholderCube->SetSimulatePhysics(true);
+
+		const FVector Impulse = (GetActorLocation() - BlastOrigin).GetSafeNormal() + FVector(0.f, 0.f, 0.7f);
+		PlaceholderCube->AddImpulse(Impulse.GetSafeNormal() * 30000.f, NAME_None, false);
+		PlaceholderCube->SetPhysicsAngularVelocityInDegrees(FMath::VRand() * 400.f);
+
+		SetLifeSpan(20.f);
+		return;
+	}
 
 	if (!SoldierMesh || !SoldierMesh->GetSkeletalMeshAsset())
 	{

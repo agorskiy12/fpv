@@ -43,6 +43,15 @@ private:
 	/** After-action report shown over the kill cam. Returns true when the sequence is running. */
 	bool DrawStrikeReport();
 
+	/** Enemy operator signal strength -- the instrument the whole hunt is flown on. */
+	void DrawSignalMeter();
+
+	/** Smoothed so the reading never jitters, since the gradient is what is being read. */
+	float DisplayedSignal = 0.f;
+
+	/** Strongest reading seen this sortie, as a reference to judge the current one against. */
+	float PeakSignal = 0.f;
+
 	/** Debug overlay for bringing up an RC transmitter. Toggle with the fpv.ShowChannels console variable. */
 	void DrawChannelMonitor();
 

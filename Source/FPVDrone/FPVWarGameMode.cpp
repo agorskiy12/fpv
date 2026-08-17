@@ -6,6 +6,7 @@
 #include "FPVHUD.h"
 #include "FPVPlayerState.h"
 #include "HelicopterTarget.h"
+#include "OperatorTarget.h"
 #include "SoldierTarget.h"
 #include "StrikeCamera.h"
 #include "VehicleTarget.h"
@@ -470,15 +471,20 @@ namespace
 			{ FVector( -8000.f, -1500.f, 0.f),  135.f,    0.f, false },   // standing watch
 		};
 
+		// Infantry split between the two sides, so faction colours and attitude can be read at a
+		// glance while the identification design is still being worked out.
+		int32 PatrolIndex = 0;
 		for (const FPatrol& Patrol : Patrols)
 		{
 			const FVector Location = RunwayCentre + Patrol.Offset + FVector(0.f, 0.f, RunwayDeckZ);
+			const EFaction PatrolFaction = (PatrolIndex % 2 == 0) ? EFaction::Russia : EFaction::NATO;
 
 			SpawnTarget(ASoldierTarget::StaticClass(), Location, FRotator(0.f, Patrol.Yaw, 0.f),
-				[&Patrol](ADroneTarget* T)
+				[&Patrol, PatrolFaction](ADroneTarget* T)
 				{
 					if (ASoldierTarget* S = Cast<ASoldierTarget>(T))
 					{
+						S->Faction = PatrolFaction;
 						S->SoldierRole = Patrol.bObjective ? ESoldierRole::Objective : ESoldierRole::Guard;
 
 						// A zero-length beat means they hold position rather than walk.
@@ -487,7 +493,19 @@ namespace
 							: TArray<FVector>{ FVector::ZeroVector };
 					}
 				});
+
+			++PatrolIndex;
 		}
+
+		// One operator per side, at opposite ends of the deck and well apart, so finding one is
+		// a search rather than a coincidence.
+		SpawnTarget(AOperatorTarget::StaticClass(),
+			RunwayCentre + FVector(-24000.f, -7000.f, RunwayDeckZ), FRotator(0.f, 45.f, 0.f),
+			[](ADroneTarget* T) { T->Faction = EFaction::Russia; });
+
+		SpawnTarget(AOperatorTarget::StaticClass(),
+			RunwayCentre + FVector(23000.f, 7500.f, RunwayDeckZ), FRotator(0.f, 225.f, 0.f),
+			[](ADroneTarget* T) { T->Faction = EFaction::NATO; });
 
 		// A flight of loitering munitions, spread across heights and speeds so the sky is never
 		// empty and there is always something to climb after.
@@ -847,9 +865,70 @@ bool AFPVWarGameMode::WantsToSkipStrikeSequence() const
 		|| PC->WasInputKeyJustPressed(EKeys::Gamepad_FaceButton_Bottom);
 }
 
+void AFPVWarGameMode::GetOperators(TArray<AOperatorTarget*>& OutOperators) const
+{
+	OutOperators.Reset();
+	for (ADroneTarget* Target : AllTargets)
+	{
+		if (AOperatorTarget* Operator = Cast<AOperatorTarget>(Target))
+		{
+			OutOperators.Add(Operator);
+		}
+	}
+}
+
+float AFPVWarGameMode::GetHostileSignalStrengthAt(const FVector& SampleLocation, EFaction SensingFaction) const
+{
+	float Strongest = 0.f;
+
+	for (ADroneTarget* Target : AllTargets)
+	{
+		const AOperatorTarget* Operator = Cast<AOperatorTarget>(Target);
+		if (!Operator || Operator->IsDestroyed())
+		{
+			continue;
+		}
+
+		// Only hostile transmissions register. Your own side's traffic is not what you are
+		// listening for, and Neutral never registers at all.
+		if (FPVFaction::GetAttitude(SensingFaction, Operator->GetFaction()) != EFactionAttitude::Hostile)
+		{
+			continue;
+		}
+
+		Strongest = FMath::Max(Strongest, Operator->GetSignalStrengthAt(SampleLocation));
+	}
+
+	return Strongest;
+}
+
 void AFPVWarGameMode::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+
+	// An operator transmits while their side has a drone in the air. For the player that is the
+	// pawn, whenever its warhead has not yet been spent -- flying is what gives you away.
+	{
+		const AFPVDronePawn* PlayerDrone = Cast<AFPVDronePawn>(UGameplayStatics::GetPlayerPawn(GetWorld(), 0));
+		const bool bPlayerAirborne = PlayerDrone && !PlayerDrone->IsWarheadSpent();
+		const EFaction PlayerFaction = FPVFaction::GetFactionOf(PlayerDrone);
+
+		TArray<AOperatorTarget*> Operators;
+		GetOperators(Operators);
+
+		for (AOperatorTarget* Operator : Operators)
+		{
+			if (Operator->IsDestroyed())
+			{
+				continue;
+			}
+
+			// The player's own operator transmits with the player's drone. Enemy operators are
+			// assumed to be flying continuously until their own drone logic exists.
+			const bool bIsPlayerSide = (Operator->GetFaction() == PlayerFaction) && PlayerFaction != EFaction::Neutral;
+			Operator->SetTransmitting(bIsPlayerSide ? bPlayerAirborne : true);
+		}
+	}
 
 	if (bSlowMoActive && GetWorld()->GetRealTimeSeconds() >= SlowMoEndRealTime)
 	{

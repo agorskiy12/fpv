@@ -208,6 +208,7 @@ void AFPVHUD::DrawHUD()
 	DrawCrosshair();
 	DrawThrottleBar(Drone->GetThrottle());
 	DrawTelemetry(Drone->GetSpeedKPH(), Drone->GetAltitudeMeters());
+	DrawSignalMeter();
 	DrawTargetMarkers();
 	DrawWarheadStatus(Drone);
 	DrawMissionStatus();
@@ -341,6 +342,59 @@ void AFPVHUD::DrawWarheadStatus(const AFPVDronePawn* Drone)
 		DrawText(TEXT("climb to arm"),
 			FLinearColor(1.f, 1.f, 1.f, 0.45f), X, Y + 24.f, GEngine->GetSmallFont(), 1.f);
 	}
+}
+
+void AFPVHUD::DrawSignalMeter()
+{
+	const AFPVWarGameMode* GameMode = GetWorld() ? GetWorld()->GetAuthGameMode<AFPVWarGameMode>() : nullptr;
+	const APawn* Drone = GetOwningPawn();
+	if (!GameMode || !Drone)
+	{
+		return;
+	}
+
+	const float Raw = GameMode->GetHostileSignalStrengthAt(
+		Drone->GetActorLocation(), FPVFaction::GetFactionOf(Drone));
+
+	// Heavily smoothed. The reading is useless as an absolute value -- what matters is whether
+	// it is rising or falling as you fly, and raw samples jitter far too much to read a trend off.
+	DisplayedSignal = FMath::FInterpTo(DisplayedSignal, Raw, GetWorld()->GetDeltaSeconds(), 3.f);
+	PeakSignal = FMath::Max(PeakSignal, DisplayedSignal);
+
+	UFont* Font = GEngine->GetMediumFont();
+	UFont* SmallFont = GEngine->GetSmallFont();
+
+	const float BarW = 240.f;
+	const float BarH = 14.f;
+	const float X = (Canvas->SizeX - BarW) * 0.5f;
+	const float Y = Canvas->SizeY - 74.f;
+
+	DrawText(TEXT("SIGNAL"), FLinearColor(1.f, 1.f, 1.f, 0.55f), X, Y - 20.f, SmallFont, 1.f);
+
+	DrawRect(FLinearColor(0.f, 0.f, 0.f, 0.55f), X, Y, BarW, BarH);
+
+	if (DisplayedSignal <= KINDA_SMALL_NUMBER)
+	{
+		DrawText(TEXT("no contact"), FLinearColor(1.f, 1.f, 1.f, 0.35f), X + 6.f, Y - 1.f, SmallFont, 1.f);
+		return;
+	}
+
+	// Warms from cold blue through amber to red as you close.
+	const FLinearColor Cold(0.25f, 0.55f, 1.f);
+	const FLinearColor Hot(1.f, 0.25f, 0.1f);
+	const FLinearColor Colour = FMath::Lerp(Cold, Hot, DisplayedSignal);
+
+	DrawRect(Colour, X, Y, BarW * FMath::Clamp(DisplayedSignal, 0.f, 1.f), BarH);
+
+	// A tick at the best reading so far, so you can tell whether this leg improved on the last.
+	if (PeakSignal > DisplayedSignal + 0.01f)
+	{
+		const float PeakX = X + BarW * FMath::Clamp(PeakSignal, 0.f, 1.f);
+		DrawLine(PeakX, Y - 3.f, PeakX, Y + BarH + 3.f, FLinearColor(1.f, 1.f, 1.f, 0.5f), 1.f);
+	}
+
+	DrawText(FString::Printf(TEXT("%3d%%"), FMath::RoundToInt(DisplayedSignal * 100.f)),
+		Colour, X + BarW + 10.f, Y - 2.f, Font, 1.f);
 }
 
 bool AFPVHUD::DrawStrikeReport()
