@@ -71,8 +71,17 @@ namespace
 
 			const FVector MeshSize = RawSize * RunwayScale;
 
-			// Sit the scaled base on the ground plane, wherever the pivot happens to be.
-			const FVector SpawnLocation = RunwayCentre - FVector(0.f, 0.f, MeshBounds.Min.Z * RunwayScale);
+			// Centre the mesh on RunwayCentre in all three axes, not just vertically.
+			//
+			// Only Z was corrected before, which silently assumed the pivot sat at the middle of
+			// the footprint. Pivots are just as often at a corner or one end, and when that is
+			// the case the deck extends away from where the vehicles are driving -- so they run
+			// down a strip of empty ground beside the runway rather than along it.
+			const FVector BoundsCentre = MeshBounds.GetCenter() * RunwayScale;
+			const FVector SpawnLocation = RunwayCentre - FVector(
+				BoundsCentre.X,
+				BoundsCentre.Y,
+				MeshBounds.Min.Z * RunwayScale);
 
 			FActorSpawnParameters RunwayParams;
 			RunwayParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -98,6 +107,18 @@ namespace
 					*SpawnLocation.ToCompactString(), RunwayScale,
 					MeshSize.X, MeshSize.Y, MeshSize.Z,
 					bRunwayAlongX ? TEXT("X") : TEXT("Y"), RunwayDeckZ);
+
+				// Pivot offset relative to the footprint. Far from zero means the pivot is not
+				// centred, which is exactly what threw the vehicle routes off the deck.
+				UE_LOG(LogFPV, Log,
+					TEXT("Runway raw bounds min %s max %s -- pivot offset from centre %s (scaled)"),
+					*MeshBounds.Min.ToCompactString(), *MeshBounds.Max.ToCompactString(),
+					*BoundsCentre.ToCompactString());
+
+				// Where the deck actually spans in world space, for checking the routes against.
+				UE_LOG(LogFPV, Log, TEXT("Runway deck spans X %.0f..%.0f, Y %.0f..%.0f"),
+					RunwayCentre.X - MeshSize.X * 0.5f, RunwayCentre.X + MeshSize.X * 0.5f,
+					RunwayCentre.Y - MeshSize.Y * 0.5f, RunwayCentre.Y + MeshSize.Y * 0.5f);
 			}
 		}
 		else
