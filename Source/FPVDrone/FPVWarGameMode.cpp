@@ -760,7 +760,7 @@ void AFPVWarGameMode::ApplyBlast(const FVector& Origin, float Radius, float Dama
 	if (AFPVDronePawn* Drone = Cast<AFPVDronePawn>(UGameplayStatics::GetPlayerPawn(GetWorld(), 0)))
 	{
 		const float Distance = FVector::Dist(Drone->GetActorLocation(), Origin);
-		const float Trauma = FImpactShake::TraumaFromBlast(Distance, Radius);
+		const float Trauma = FImpactShake::TraumaFromBlast(Distance, Radius, 1.8f);
 		if (Trauma > 0.f)
 		{
 			Drone->AddImpactShake(Trauma);

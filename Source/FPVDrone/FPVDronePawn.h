@@ -307,11 +307,11 @@ public:
 
 	/** Blast radius in centimetres. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Warhead")
-	float BlastRadius = 1000.f;
+	float BlastRadius = 1400.f;
 
 	/** Damage at the centre of the blast, falling off linearly to zero at BlastRadius. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Warhead")
-	float BlastDamage = 220.f;
+	float BlastDamage = 300.f;
 
 	/**
 	 * Impact speed needed to set the warhead off, cm/s.

@@ -1,4 +1,5 @@
 #include "ExplosionEffect.h"
+#include "FPVDrone.h"
 
 #include "Components/PointLightComponent.h"
 #include "DrawDebugHelpers.h"
@@ -7,7 +8,29 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "PhysicsEngine/RadialForceComponent.h"
+#include "HAL/IConsoleManager.h"
 #include "UObject/ConstructorHelpers.h"
+
+namespace
+{
+	/** Overrides the class default at runtime, so explosion size can be judged by eye. */
+	float GExplosionScaleOverride = -1.f;
+
+	FAutoConsoleCommand CmdExplosionScale(
+		TEXT("fpv.ExplosionScale"),
+		TEXT("Multiplier on explosion visual size. No argument reports the current value."),
+		FConsoleCommandWithArgsDelegate::CreateStatic([](const TArray<FString>& Args)
+		{
+			if (Args.Num() > 0)
+			{
+				GExplosionScaleOverride = FMath::Max(static_cast<float>(FCString::Atof(*Args[0])), 0.01f);
+			}
+			UE_LOG(LogFPV, Log, TEXT("Explosion scale %s"),
+				GExplosionScaleOverride > 0.f
+					? *FString::Printf(TEXT("%.2f"), GExplosionScaleOverride)
+					: TEXT("(class default)"));
+		}));
+}
 
 AExplosionEffect::AExplosionEffect()
 {
@@ -18,8 +41,8 @@ AExplosionEffect::AExplosionEffect()
 
 	FlashLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("FlashLight"));
 	FlashLight->SetupAttachment(Root);
-	FlashLight->SetLightColor(FLinearColor(1.f, 0.62f, 0.25f));
-	FlashLight->SetAttenuationRadius(3000.f);
+	FlashLight->SetLightColor(FLinearColor(1.f, 0.6f, 0.22f));
+	FlashLight->SetAttenuationRadius(6000.f);
 	FlashLight->SetCastShadows(false);
 	FlashLight->SetIntensity(0.f);
 
@@ -116,10 +139,13 @@ AExplosionEffect* AExplosionEffect::Spawn(UWorld* World, const FVector& Location
 	if (Effect)
 	{
 		Effect->Radius = InRadius;
-		Effect->PeakLightIntensity *= Intensity;
-		Effect->BlastForce->Radius = InRadius;
-		Effect->BlastForce->ImpulseStrength = 1400.f * Intensity;
-		Effect->FlashLight->SetAttenuationRadius(FMath::Max(InRadius * 3.f, 1500.f));
+		Effect->PeakLightIntensity *= Intensity * 2.f;
+		Effect->BlastForce->Radius = InRadius * 1.5f;
+		Effect->BlastForce->ImpulseStrength = 2600.f * Intensity;
+
+		// Lights the surroundings far beyond the lethal radius, which is most of what makes a
+		// detonation feel large from the air.
+		Effect->FlashLight->SetAttenuationRadius(FMath::Max(InRadius * 6.f, 4000.f));
 	}
 	return Effect;
 }
@@ -134,7 +160,11 @@ void AExplosionEffect::BeginPlay()
 
 	if (System)
 	{
-		const float FXScale = bScaleFXToRadius ? FMath::Max(Radius / 100.f, 0.1f) : 1.f;
+		float FXScale = bScaleFXToRadius ? FMath::Max(Radius / 100.f, 0.1f) : 1.f;
+		FXScale *= (GExplosionScaleOverride > 0.f)
+			? GExplosionScaleOverride
+			: FMath::Max(FXScaleMultiplier, 0.01f);
+
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 			GetWorld(), System, GetActorLocation(), FRotator::ZeroRotator,
 			FVector(FXScale), /*bAutoDestroy=*/true);

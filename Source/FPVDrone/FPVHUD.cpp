@@ -28,6 +28,19 @@ namespace
 		TEXT("Use fpv.ResetChannelRanges to clear the observed min/max."),
 		ECVF_Default);
 
+	/**
+	 * Off by design, not merely hidden.
+	 *
+	 * The game identifies targets by looking at them -- markers telling you what everything is
+	 * would make the civilian and friendly-fire penalties meaningless, since there would be
+	 * nothing left to misidentify. Kept behind a switch purely for debugging placement.
+	 */
+	static TAutoConsoleVariable<int32> CVarShowTargetMarkers(
+		TEXT("fpv.ShowTargetMarkers"),
+		0,
+		TEXT("Draw brackets and labels over targets. Off by design -- identification is meant to be visual."),
+		ECVF_Default);
+
 	static TAutoConsoleVariable<int32> CVarShowDevices(
 		TEXT("fpv.ShowDevices"),
 		0,
@@ -209,7 +222,11 @@ void AFPVHUD::DrawHUD()
 	DrawThrottleBar(Drone->GetThrottle());
 	DrawTelemetry(Drone->GetSpeedKPH(), Drone->GetAltitudeMeters());
 	DrawSignalMeter();
-	DrawTargetMarkers();
+
+	if (CVarShowTargetMarkers.GetValueOnGameThread() != 0)
+	{
+		DrawTargetMarkers();
+	}
 	DrawWarheadStatus(Drone);
 	DrawMissionStatus();
 }

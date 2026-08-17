@@ -85,6 +85,16 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
 	bool bScaleFXToRadius = false;
 
+	/**
+	 * Flat multiplier on the Niagara system's size.
+	 *
+	 * Separate from bScaleFXToRadius on purpose. That option ties the fireball to the blast
+	 * radius, which is a gameplay number and should not be inflated just to look better. This
+	 * scales the spectacle alone, leaving damage untouched.
+	 */
+	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
+	float FXScaleMultiplier = 2.4f;
+
 	UPROPERTY(EditAnywhere, Category = "Explosion|Assets")
 	TObjectPtr<USoundBase> ExplosionSound;
 
