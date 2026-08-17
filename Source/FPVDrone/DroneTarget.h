@@ -191,6 +191,12 @@ protected:
 	/** Called once health reaches zero. Subclasses stop their movement here. */
 	virtual void OnDestroyed_Internal(AActor* Killer);
 
+	/**
+	 * True for subclasses that draw themselves some other way -- a skeletal mesh, say.
+	 * The primitive body and the static override are both suppressed when this is set.
+	 */
+	virtual bool HasCustomVisual() const { return false; }
+
 	/** Rebuild the body for the current Kind and BodySize. */
 	void RebuildBody();
 

@@ -54,13 +54,23 @@ AExplosionEffect::AExplosionEffect()
 		ExplosionFXLarge = LargeFX.Object;
 	}
 
-	// Convention over configuration: a system authored at this path overrides the pack outright.
-	// See docs/NIAGARA_EXPLOSION.md.
-	static ConstructorHelpers::FObjectFinder<UNiagaraSystem> AuthoredFX(
-		TEXT("/Game/FX/NS_Explosion.NS_Explosion"));
-	if (AuthoredFX.Succeeded())
+	// The authored-override path is resolved in BeginPlay rather than here. ConstructorHelpers
+	// logs a hard Error when an asset is missing, and this one is optional by design -- an
+	// error every launch for a file nobody is required to create is just noise.
+}
+
+void AExplosionEffect::TryLoadAuthoredOverride()
+{
+	if (ExplosionFX)
 	{
-		ExplosionFX = AuthoredFX.Object;
+		return;
+	}
+
+	// See docs/NIAGARA_EXPLOSION.md: a system authored here overrides the pack outright.
+	static const FSoftObjectPath AuthoredPath(TEXT("/Game/FX/NS_Explosion.NS_Explosion"));
+	if (UObject* Loaded = AuthoredPath.ResolveObject())
+	{
+		ExplosionFX = Cast<UNiagaraSystem>(Loaded);
 	}
 }
 
@@ -117,6 +127,8 @@ AExplosionEffect* AExplosionEffect::Spawn(UWorld* World, const FVector& Location
 void AExplosionEffect::BeginPlay()
 {
 	Super::BeginPlay();
+
+	TryLoadAuthoredOverride();
 
 	UNiagaraSystem* System = ResolveExplosionSystem();
 

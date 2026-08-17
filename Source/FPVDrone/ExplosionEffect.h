@@ -107,4 +107,7 @@ private:
 
 	/** The explicit override if set, otherwise the size-graded system matching Radius. */
 	class UNiagaraSystem* ResolveExplosionSystem() const;
+
+	/** Picks up an optional authored system if one happens to be loaded. Never logs on absence. */
+	void TryLoadAuthoredOverride();
 };

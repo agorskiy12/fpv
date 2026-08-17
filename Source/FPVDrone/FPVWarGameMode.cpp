@@ -5,6 +5,7 @@
 #include "FPVDronePawn.h"
 #include "FPVHUD.h"
 #include "HelicopterTarget.h"
+#include "SoldierTarget.h"
 #include "StrikeCamera.h"
 #include "VehicleTarget.h"
 
@@ -187,6 +188,37 @@ namespace
 						V->bLoopRoute = true;
 						// Wide turns at the ends, so they sweep round instead of pivoting on the spot.
 						V->TurnRateDegrees = 55.f;
+					}
+				});
+		}
+
+		// Infantry. Patrols along the deck edge and around the structures, so the place reads as
+		// occupied rather than as a collection of props. Mostly guards; a couple are objectives.
+		struct FPatrol { FVector Offset; float Yaw; float Length; bool bObjective; };
+		static const FPatrol Patrols[] = {
+			{ FVector(-18000.f,  5200.f, 0.f),    0.f, 6000.f, false },
+			{ FVector(  6000.f, -5200.f, 0.f),  180.f, 7000.f, false },
+			{ FVector( 22000.f,  4600.f, 0.f),   90.f, 3000.f, true  },
+			{ FVector(-24000.f, -3800.f, 0.f),  -90.f, 2400.f, false },
+			{ FVector( 14000.f,  2000.f, 0.f),   45.f, 4200.f, true  },
+			{ FVector( -8000.f, -1500.f, 0.f),  135.f,    0.f, false },   // standing watch
+		};
+
+		for (const FPatrol& Patrol : Patrols)
+		{
+			const FVector Location = RunwayCentre + Patrol.Offset + FVector(0.f, 0.f, RunwayDeckZ);
+
+			SpawnTarget(ASoldierTarget::StaticClass(), Location, FRotator(0.f, Patrol.Yaw, 0.f),
+				[&Patrol](ADroneTarget* T)
+				{
+					if (ASoldierTarget* S = Cast<ASoldierTarget>(T))
+					{
+						S->SoldierRole = Patrol.bObjective ? ESoldierRole::Objective : ESoldierRole::Guard;
+
+						// A zero-length beat means they hold position rather than walk.
+						S->PatrolPoints = (Patrol.Length > 0.f)
+							? TArray<FVector>{ FVector::ZeroVector, FVector(Patrol.Length, 0.f, 0.f) }
+							: TArray<FVector>{ FVector::ZeroVector };
 					}
 				});
 		}

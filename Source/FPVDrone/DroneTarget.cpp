@@ -106,6 +106,15 @@ void ADroneTarget::RebuildBody()
 {
 	PartsUsed = 0;
 
+	// A subclass supplying its own visual wants none of what follows.
+	if (HasCustomVisual())
+	{
+		OverrideMesh->SetVisibility(false);
+		OverrideMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		HideUnusedParts();
+		return;
+	}
+
 	// A real mesh replaces the placeholder outright. Gameplay still reads BodySize, so swapping
 	// art in does not silently change blast falloff or HUD marker sizing.
 	if (BodyMesh)
