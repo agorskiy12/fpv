@@ -11,6 +11,7 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -20,6 +21,143 @@
 
 namespace
 {
+	/** The drivable surface found on a scene mesh, in world space. */
+	struct FDeckSurface
+	{
+		bool bValid = false;
+		FBox Extent = FBox(ForceInit);
+		float DeckZ = 0.f;
+		bool bAlongX = true;
+	};
+
+	/**
+	 * Locate the drivable deck by tracing the geometry, rather than trusting the bounding box.
+	 *
+	 * The runway asset is not a slab -- it is an entire scene, sea included, spanning 79 km. Its
+	 * bounding box centre lands in open water, which is why anything positioned from those
+	 * bounds ends up hovering offshore.
+	 *
+	 * So the surface is measured instead: cast a grid of downward traces, bin the hit heights,
+	 * and take the highest plateau that covers a meaningful share of them. On an elevated
+	 * concrete deck that is the deck; sea and terrain sit lower and get discarded.
+	 */
+	FDeckSurface FindDeckSurface(UWorld* World, AActor* SceneActor, const FBox& WorldBounds)
+	{
+		FDeckSurface Result;
+		if (!World || !SceneActor)
+		{
+			return Result;
+		}
+
+		constexpr int32 SamplesX = 60;
+		constexpr int32 SamplesY = 30;
+		constexpr float HeightBinSize = 100.f;
+
+		const float TraceTop = WorldBounds.Max.Z + 10000.f;
+		const float TraceBottom = WorldBounds.Min.Z - 10000.f;
+
+		// Complex traces hit the render geometry, which is what a scene mesh usually has. If the
+		// asset only carries simple collision the first pass finds nothing, so both are tried.
+		FCollisionQueryParams ComplexParams(SCENE_QUERY_STAT(FindDeckComplex), /*bTraceComplex=*/true);
+		FCollisionQueryParams SimpleParams(SCENE_QUERY_STAT(FindDeckSimple), /*bTraceComplex=*/false);
+		bool bUseComplex = true;
+
+		// Height bin -> hit points that landed in it.
+		TMap<int32, TArray<FVector>> Plateaus;
+		int32 TotalHits = 0;
+
+		for (int32 Pass = 0; Pass < 2 && TotalHits == 0; ++Pass)
+		{
+			bUseComplex = (Pass == 0);
+			const FCollisionQueryParams& Params = bUseComplex ? ComplexParams : SimpleParams;
+
+			for (int32 IX = 0; IX <= SamplesX; ++IX)
+			{
+				const float Alpha = static_cast<float>(IX) / SamplesX;
+				const float X = FMath::Lerp(WorldBounds.Min.X, WorldBounds.Max.X, Alpha);
+
+				for (int32 IY = 0; IY <= SamplesY; ++IY)
+				{
+					const float Beta = static_cast<float>(IY) / SamplesY;
+					const float Y = FMath::Lerp(WorldBounds.Min.Y, WorldBounds.Max.Y, Beta);
+
+					FHitResult Hit;
+					const bool bHit = World->LineTraceSingleByChannel(
+						Hit, FVector(X, Y, TraceTop), FVector(X, Y, TraceBottom), ECC_Visibility, Params);
+
+					if (!bHit || Hit.GetActor() != SceneActor)
+					{
+						continue;   // sky, or something that is not the scene mesh
+					}
+
+					const int32 Bin = FMath::FloorToInt(Hit.ImpactPoint.Z / HeightBinSize);
+					Plateaus.FindOrAdd(Bin).Add(Hit.ImpactPoint);
+					++TotalHits;
+				}
+			}
+		}
+
+		UE_LOG(LogFPV, Log, TEXT("Deck search: %d hits using %s collision"),
+			TotalHits, bUseComplex ? TEXT("complex") : TEXT("simple"));
+
+		if (TotalHits == 0)
+		{
+			UE_LOG(LogFPV, Warning,
+				TEXT("Deck search hit nothing -- the scene mesh probably has no collision."));
+			return Result;
+		}
+
+		// The deck is the highest surface that still covers a decent share of the footprint.
+		// A minimum share rejects railings, masts and other small high details.
+		const int32 MinimumHits = FMath::Max(12, TotalHits / 40);
+
+		int32 BestBin = TNumericLimits<int32>::Lowest();
+		for (const TPair<int32, TArray<FVector>>& Pair : Plateaus)
+		{
+			if (Pair.Value.Num() >= MinimumHits && Pair.Key > BestBin)
+			{
+				BestBin = Pair.Key;
+			}
+		}
+
+		if (BestBin == TNumericLimits<int32>::Lowest())
+		{
+			UE_LOG(LogFPV, Warning, TEXT("Deck search found no plateau across %d hits."), TotalHits);
+			return Result;
+		}
+
+		// Merge the winning bin with its immediate neighbours, so a deck straddling a bin
+		// boundary is not cut in half.
+		TArray<FVector> DeckPoints;
+		for (int32 Bin = BestBin - 1; Bin <= BestBin + 1; ++Bin)
+		{
+			if (const TArray<FVector>* Points = Plateaus.Find(Bin))
+			{
+				DeckPoints.Append(*Points);
+			}
+		}
+
+		Result.Extent = FBox(ForceInit);
+		float ZSum = 0.f;
+		for (const FVector& Point : DeckPoints)
+		{
+			Result.Extent += Point;
+			ZSum += Point.Z;
+		}
+
+		Result.DeckZ = ZSum / DeckPoints.Num();
+		Result.bAlongX = Result.Extent.GetSize().X >= Result.Extent.GetSize().Y;
+		Result.bValid = true;
+
+		UE_LOG(LogFPV, Log,
+			TEXT("Deck found: %d/%d hits, centre %s, %.0f x %.0f cm, surface Z=%.0f, long axis %s"),
+			DeckPoints.Num(), TotalHits, *Result.Extent.GetCenter().ToCompactString(),
+			Result.Extent.GetSize().X, Result.Extent.GetSize().Y, Result.DeckZ,
+			Result.bAlongX ? TEXT("X") : TEXT("Y"));
+
+		return Result;
+	}
+
 	/**
 	 * Drop a representative mission around the player.
 	 *
@@ -56,7 +194,7 @@ namespace
 		// scene puts the deck a comfortable flight away rather than under the launch point --
 		// spawning inside collision looks like the game is broken, because the physics solver
 		// spends every frame trying to push you out and you cannot move at all.
-		const FVector RunwayCentre = Origin + FVector(45000.f, 0.f, 0.f);
+		FVector RunwayCentre = Origin + FVector(45000.f, 0.f, 0.f);
 
 		if (UStaticMesh* RunwayMesh = LoadObject<UStaticMesh>(nullptr,
 			TEXT("/Game/Fab/Dubai_Skydive_Runway/bahn/StaticMeshes/bahn.bahn")))
@@ -95,12 +233,56 @@ namespace
 				RunwayComponent->SetWorldScale3D(FVector(RunwayScale));
 				RunwayComponent->SetCollisionProfileName(TEXT("BlockAllDynamic"));
 
+				// Provisional values from the bounds; replaced below by what is actually there.
 				bRunwayAlongX = MeshSize.X >= MeshSize.Y;
 				RunwayLength = bRunwayAlongX ? MeshSize.X : MeshSize.Y;
 				RunwayWidth = bRunwayAlongX ? MeshSize.Y : MeshSize.X;
-
-				// Vehicles drive on the top surface, which for a deck is the upper bound.
 				RunwayDeckZ = MeshSize.Z;
+
+				// Physics state is built from the mesh and transform that were set *after*
+				// spawning, so it has to be rebuilt before anything can trace against it.
+				// Without this the deck search finds nothing and silently falls back.
+				RunwayComponent->UpdateBounds();
+				Runway->UpdateComponentTransforms();
+				RunwayComponent->RecreatePhysicsState();
+
+				const FBox WorldBounds = RunwayComponent->Bounds.GetBox();
+				UE_LOG(LogFPV, Log, TEXT("Runway world bounds min %s max %s"),
+					*WorldBounds.Min.ToCompactString(), *WorldBounds.Max.ToCompactString());
+
+				// Whether the asset carries usable collision at all. Without it nothing can be
+				// traced, measured, driven on, or crashed into.
+				if (UBodySetup* Setup = RunwayMesh->GetBodySetup())
+				{
+					UE_LOG(LogFPV, Log,
+						TEXT("Runway collision: trace flag %d, %d convex, %d box, %d sphere, tri-mesh %s"),
+						static_cast<int32>(Setup->CollisionTraceFlag),
+						Setup->AggGeom.ConvexElems.Num(),
+						Setup->AggGeom.BoxElems.Num(),
+						Setup->AggGeom.SphereElems.Num(),
+						Setup->bHasCookedCollisionData ? TEXT("yes") : TEXT("no"));
+				}
+				else
+				{
+					UE_LOG(LogFPV, Warning, TEXT("Runway mesh has NO body setup -- no collision whatsoever."));
+				}
+				const FDeckSurface Deck = FindDeckSurface(World, Runway, WorldBounds);
+
+				if (Deck.bValid)
+				{
+					// Everything is positioned from the measured surface from here on. The
+					// bounding box describes an entire island; only this describes the road.
+					RunwayCentre = FVector(Deck.Extent.GetCenter().X, Deck.Extent.GetCenter().Y, 0.f);
+					RunwayLength = Deck.bAlongX ? Deck.Extent.GetSize().X : Deck.Extent.GetSize().Y;
+					RunwayWidth = Deck.bAlongX ? Deck.Extent.GetSize().Y : Deck.Extent.GetSize().X;
+					RunwayDeckZ = Deck.DeckZ;
+					bRunwayAlongX = Deck.bAlongX;
+				}
+				else
+				{
+					UE_LOG(LogFPV, Warning,
+						TEXT("Falling back to bounding-box layout; vehicles may not sit on the deck."));
+				}
 
 				UE_LOG(LogFPV, Log,
 					TEXT("Runway at %s -- scaled %.4f to %.0f x %.0f x %.0f cm, long axis %s, deck Z=%.0f"),
@@ -285,7 +467,9 @@ namespace
 		// The transport heli orbits the runway, so the scene has a centre instead of a target
 		// scattered off in empty ground. Spawned well clear of the player start -- it is large,
 		// and starting inside it would be indistinguishable from a broken game.
-		SpawnTarget(AHelicopterTarget::StaticClass(), RunwayCentre + FVector(0.f, 0.f, 2200.f), FRotator(0.f, 45.f, 0.f),
+		// Altitude is measured from the deck, not from world zero -- the deck may be well above it.
+		SpawnTarget(AHelicopterTarget::StaticClass(),
+			RunwayCentre + FVector(0.f, 0.f, RunwayDeckZ + 2200.f), FRotator(0.f, 45.f, 0.f),
 			[RunwayWidth](ADroneTarget* T)
 			{
 				if (AHelicopterTarget* H = Cast<AHelicopterTarget>(T))
