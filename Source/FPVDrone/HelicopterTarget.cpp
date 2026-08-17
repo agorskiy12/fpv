@@ -46,8 +46,8 @@ AHelicopterTarget::AHelicopterTarget()
 	// tens of metres up -- and at that height it is genuinely reachable, which makes it a target
 	// rather than a distant decoration. It is also the one thing in the scene big enough to read
 	// clearly at low altitude.
-	CruiseSpeed = 550.f;
-	RunSpeed = 1100.f;
+	CruiseSpeed = 420.f;        // about 15 km/h -- a loiter, not a transit
+	RunSpeed = 950.f;
 	OrbitRadius = 11000.f;
 	OrbitAltitude = 2200.f;
 	MaxBankDegrees = 12.f;      // gentle, at this speed it is barely leaning
@@ -127,7 +127,15 @@ void AHelicopterTarget::TickOrbit(float DeltaSeconds)
 
 	OrbitAngle += AngularRate * DeltaSeconds;
 
-	const FVector Position = OrbitCentre + FVector(
+	// Two different periods, so the wander never lines up with itself and the aircraft works
+	// its way around the area instead of grinding the same circle.
+	DriftPhase += DeltaSeconds / FMath::Max(CentreDriftPeriod, 1.f) * 2.f * PI;
+	const FVector DriftedCentre = OrbitCentre + FVector(
+		FMath::Sin(DriftPhase) * CentreDriftDistance,
+		FMath::Cos(DriftPhase * 0.63f) * CentreDriftDistance * 0.55f,
+		0.f);
+
+	const FVector Position = DriftedCentre + FVector(
 		FMath::Cos(OrbitAngle) * CurrentOrbitRadius,
 		FMath::Sin(OrbitAngle) * CurrentOrbitRadius,
 		CurrentAltitude + FMath::Sin(BobPhase) * BobAmplitude);

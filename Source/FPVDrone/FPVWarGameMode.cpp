@@ -514,15 +514,18 @@ namespace
 		// Altitude is measured from the deck, not from world zero -- the deck may be well above it.
 		SpawnTarget(AHelicopterTarget::StaticClass(),
 			RunwayCentre + FVector(0.f, 0.f, RunwayDeckZ + 2200.f), FRotator(0.f, 45.f, 0.f),
-			[RunwayWidth](ADroneTarget* T)
+			[RunwayWidth, RunwayLength](ADroneTarget* T)
 			{
 				if (AHelicopterTarget* H = Cast<AHelicopterTarget>(T))
 				{
 					H->bOrbit = true;
-					// Sized to the runway's width rather than its length, so it works the deck
-					// instead of touring the whole airfield. Low and slow enough to be caught.
 					H->OrbitRadius = FMath::Max(RunwayWidth * 0.8f, 7000.f);
 					H->OrbitAltitude = 2000.f;
+
+					// The wander is scaled to the runway, so it works the length of the deck
+					// over a couple of minutes rather than hovering above one spot.
+					H->CentreDriftDistance = FMath::Max(RunwayLength * 0.28f, 10000.f);
+					H->CentreDriftPeriod = 95.f;
 				}
 			});
 

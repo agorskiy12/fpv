@@ -52,6 +52,21 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helicopter|Orbit")
 	bool bOrbitClockwise = true;
 
+	/**
+	 * How far the centre of the circle wanders, centimetres.
+	 *
+	 * A fixed circle reads as a machine on rails after one lap. Drifting the centre on two
+	 * different periods means the path never quite repeats, so it looks like an aircraft
+	 * working an area rather than following a track -- while staying just as easy to intercept,
+	 * because locally it is still a slow steady turn.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helicopter|Orbit")
+	float CentreDriftDistance = 14000.f;
+
+	/** Seconds for one full drift cycle. Long -- this should be barely perceptible moment to moment. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helicopter|Orbit")
+	float CentreDriftPeriod = 80.f;
+
 	/** Patrol circuit in actor-local space. Used only when bOrbit is false. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Helicopter")
 	TArray<FVector> RoutePoints;
@@ -106,6 +121,7 @@ private:
 
 	FVector OrbitCentre = FVector::ZeroVector;
 	float OrbitAngle = 0.f;
+	float DriftPhase = 0.f;
 
 	/**
 	 * Eased rather than switched.
