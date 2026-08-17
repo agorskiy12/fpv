@@ -10,6 +10,7 @@
 #include "OperatorTarget.h"
 #include "SoldierTarget.h"
 #include "StrikeCamera.h"
+#include "TerrainScatter.h"
 #include "VehicleTarget.h"
 
 #include "Components/StaticMeshComponent.h"
@@ -169,6 +170,97 @@ namespace
 		return Result;
 	}
 
+	/** Loads a set of meshes by path, dropping any the content pack did not ship. */
+	TArray<UStaticMesh*> LoadMeshSet(const FString& Folder, const FString& Prefix, const TArray<FString>& Suffixes)
+	{
+		TArray<UStaticMesh*> Meshes;
+		for (const FString& Suffix : Suffixes)
+		{
+			const FString Name = Prefix + Suffix;
+			const FString Path = FString::Printf(TEXT("%s/%s.%s"), *Folder, *Name, *Name);
+			if (UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *Path))
+			{
+				Meshes.Add(Mesh);
+			}
+		}
+		return Meshes;
+	}
+
+	/**
+	 * Dress the ground with rock, scrub and a distant skyline.
+	 *
+	 * A flat untextured plane to the horizon reads as a void no matter what else is in it: with
+	 * nothing at intermediate distances there is no sense of scale or speed, and the horizon is a
+	 * hard line. Cover breaks up the middle distance and the background mountains give the sky
+	 * somewhere to stop.
+	 *
+	 * Everything here comes from the MWLandscapeAutoMaterial pack and degrades quietly if it is
+	 * absent -- an empty mesh set simply scatters nothing.
+	 */
+	void GenerateTerrain(UWorld* World, const FVector& Centre, AActor* Runway)
+	{
+		ATerrainScatter* Scatter = World->SpawnActor<ATerrainScatter>(ATerrainScatter::StaticClass());
+		if (!Scatter)
+		{
+			return;
+		}
+
+		const FString Root = TEXT("/Game/MWLandscapeAutoMaterial/Meshes");
+
+		// The airfield is the one surface that must stay clear. Everything else -- flat slab or
+		// sculpted landscape -- is fair ground.
+		TArray<TWeakObjectPtr<AActor>> Airfield;
+		if (Runway)
+		{
+			Airfield.Add(Runway);
+		}
+
+		// Distant skyline. Placed first so the far ring is stable regardless of what else is
+		// scattered, and given no collision -- these are backdrop, not terrain you can hit.
+		FScatterLayer Mountains;
+		Mountains.Meshes = LoadMeshSet(Root / TEXT("Background"), TEXT("SM_MWAM_Mountain"), { TEXT("A"), TEXT("B") });
+		Mountains.InnerRadius = 190000.f;
+		Mountains.OuterRadius = 330000.f;
+		Mountains.Count = 70;
+		Mountains.TargetSize = 62000.f;      // ~600 m, enough to read as terrain at 2-3 km
+		Mountains.ScaleVariance = 0.45f;
+		Mountains.MaxSlopeDegrees = 25.f;   // they are enormous; a tilted one reads as broken
+		Mountains.AvoidActors = Airfield;
+		Mountains.bCollides = false;
+		Scatter->ScatterLayer(Mountains, Centre, /*Seed=*/1701);
+
+		// Rock across the approach. Leaned into the surface so it sits in the ground rather than
+		// on it, and solid, because a boulder should end a low pass.
+		FScatterLayer Rocks;
+		Rocks.Meshes = LoadMeshSet(Root / TEXT("Cover"), TEXT("SM_MWAM_Stone"),
+			{ TEXT("A"), TEXT("B"), TEXT("C"), TEXT("D") });
+		Rocks.InnerRadius = 7000.f;
+		Rocks.OuterRadius = 160000.f;
+		Rocks.Count = 420;
+		Rocks.TargetSize = 320.f;
+		Rocks.ScaleVariance = 0.55f;
+		Rocks.MaxSlopeDegrees = 55.f;      // rock is the one thing that belongs on a steep face
+		Rocks.AvoidActors = Airfield;
+		Rocks.NormalAlignment = 0.55f;
+		Scatter->ScatterLayer(Rocks, Centre, /*Seed=*/2011);
+
+		// Scrub, thickest close in where the drone spends most of its time low and fast. This is
+		// the layer that actually conveys speed.
+		FScatterLayer Scrub;
+		Scrub.Meshes = LoadMeshSet(Root / TEXT("Plants"), TEXT("SM_MWAM_Grass"),
+			{ TEXT("A"), TEXT("B"), TEXT("C"), TEXT("D") });
+		Scrub.InnerRadius = 5000.f;
+		Scrub.OuterRadius = 120000.f;
+		Scrub.Count = 1600;
+		Scrub.TargetSize = 150.f;
+		Scrub.ScaleVariance = 0.4f;
+		Scrub.MaxSlopeDegrees = 35.f;
+		Scrub.AvoidActors = Airfield;
+		Scrub.NormalAlignment = 0.2f;
+		Scrub.bCollides = false;
+		Scatter->ScatterLayer(Scrub, Centre, /*Seed=*/2311);
+	}
+
 	/**
 	 * Drop a representative mission around the player.
 	 *
@@ -187,13 +279,14 @@ namespace
 									  : FVector::ZeroVector;
 
 		// --- Ground ---------------------------------------------------------------------------
-		// Skipped once the level has a real Landscape. The procedural slab exists only so the
-		// scene is not floating in void; a Landscape supersedes it entirely, and landscape
-		// materials cannot be applied to a static mesh anyway.
-		if (CVarSpawnGroundPlane.GetValueOnGameThread() != 0)
 		// The Basic template floor is only a few tens of metres across, so everything placed
 		// further out floats over nothing and the sky shows through underneath -- which reads
 		// convincingly as water. A single large slab is enough to give the scene a floor.
+		//
+		// Skipped once the level has a real Landscape. The slab exists only so the scene is not
+		// floating in void; a Landscape supersedes it entirely, and landscape materials cannot be
+		// applied to a static mesh anyway.
+		if (CVarSpawnGroundPlane.GetValueOnGameThread() != 0)
 		{
 			if (UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")))
 			{
@@ -254,6 +347,9 @@ namespace
 		// spends every frame trying to push you out and you cannot move at all.
 		FVector RunwayCentre = Origin + FVector(45000.f, 0.f, 0.f);
 
+		// Held so the terrain pass can keep scrub and rock off the airfield.
+		AStaticMeshActor* RunwayActor = nullptr;
+
 		if (UStaticMesh* RunwayMesh = LoadObject<UStaticMesh>(nullptr,
 			TEXT("/Game/Fab/Dubai_Skydive_Runway/bahn/StaticMeshes/bahn.bahn")))
 		{
@@ -282,8 +378,10 @@ namespace
 			FActorSpawnParameters RunwayParams;
 			RunwayParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 
-			if (AStaticMeshActor* Runway = World->SpawnActor<AStaticMeshActor>(
-				AStaticMeshActor::StaticClass(), SpawnLocation, FRotator::ZeroRotator, RunwayParams))
+			RunwayActor = World->SpawnActor<AStaticMeshActor>(
+				AStaticMeshActor::StaticClass(), SpawnLocation, FRotator::ZeroRotator, RunwayParams);
+
+			if (AStaticMeshActor* Runway = RunwayActor)
 			{
 				UStaticMeshComponent* RunwayComponent = Runway->GetStaticMeshComponent();
 				RunwayComponent->SetMobility(EComponentMobility::Movable);   // required when spawned at runtime
@@ -365,6 +463,11 @@ namespace
 		{
 			UE_LOG(LogFPV, Warning, TEXT("Runway mesh not found -- vehicles will use a default route."));
 		}
+
+		// --- Terrain --------------------------------------------------------------------------
+		// Run before any targets exist, so the ground traces can only land on the ground and the
+		// runway. Scattering afterwards would perch rock on the roof of a van.
+		GenerateTerrain(World, RunwayCentre, RunwayActor);
 
 		// Along the runway, centred, leaving a margin at each end so they turn on the deck.
 		const FVector RunwayAxis = bRunwayAlongX ? FVector(1.f, 0.f, 0.f) : FVector(0.f, 1.f, 0.f);
