@@ -377,15 +377,19 @@ namespace
 			return Target;
 		};
 
-		// Two structures at different ranges, to check blast falloff reads sensibly.
-		SpawnTarget(ADroneTarget::StaticClass(), Origin + FVector(4000.f, -2500.f, 0.f), FRotator::ZeroRotator,
+		// Everything below is positioned from the runway, not from the player. The scene needs a
+		// single centre -- targets left near the spawn point are simply not in the same place as
+		// the fight, and read as missing rather than distant.
+		//
+		// Structures sit off the deck edge rather than on it, so the vehicles have a clear run.
+		SpawnTarget(ADroneTarget::StaticClass(), RunwayCentre + FVector(-16000.f, -11000.f, 0.f), FRotator::ZeroRotator,
 			[](ADroneTarget* T) { T->Kind = ETargetKind::Structure; T->BodySize = FVector(900.f, 700.f, 500.f); T->MaxHealth = 140.f; });
 
-		SpawnTarget(ADroneTarget::StaticClass(), Origin + FVector(9000.f, 3000.f, 0.f), FRotator(0.f, 35.f, 0.f),
+		SpawnTarget(ADroneTarget::StaticClass(), RunwayCentre + FVector(13000.f, 12000.f, 0.f), FRotator(0.f, 35.f, 0.f),
 			[](ADroneTarget* T) { T->Kind = ETargetKind::Structure; T->BodySize = FVector(1200.f, 800.f, 700.f); T->MaxHealth = 200.f; });
 
 		// Gas line: thin and chains hard, so it rewards precision.
-		SpawnTarget(ADroneTarget::StaticClass(), Origin + FVector(5500.f, 5500.f, 0.f), FRotator(0.f, 90.f, 0.f),
+		SpawnTarget(ADroneTarget::StaticClass(), RunwayCentre + FVector(-4000.f, 10500.f, 0.f), FRotator(0.f, 90.f, 0.f),
 			[](ADroneTarget* T)
 			{
 				T->Kind = ETargetKind::GasLine;
@@ -398,7 +402,7 @@ namespace
 			});
 
 		// Substation sits near the gas line, so a good pipeline hit should take it too.
-		SpawnTarget(ADroneTarget::StaticClass(), Origin + FVector(6800.f, 6200.f, 0.f), FRotator::ZeroRotator,
+		SpawnTarget(ADroneTarget::StaticClass(), RunwayCentre + FVector(1800.f, 12000.f, 0.f), FRotator::ZeroRotator,
 			[](ADroneTarget* T) { T->Kind = ETargetKind::ElectricalStation; T->BodySize = FVector(800.f, 800.f, 600.f); T->MaxHealth = 110.f; T->ScoreValue = 350; });
 
 		// Vehicles run the length of the runway in opposing lanes. Having one coming towards you
@@ -487,23 +491,34 @@ namespace
 		// A flight of loitering munitions, spread across heights and speeds so the sky is never
 		// empty and there is always something to climb after.
 		struct FUAVSpawn { FVector Offset; float Yaw; float Speed; bool bPrimary; };
+		// Kept close in and low. Spread across half a kilometre they were technically present but
+		// effectively absent -- at 160 cm across, a UAV a few hundred metres out is a couple of
+		// pixels, so the sky read as empty.
 		static const FUAVSpawn UAVs[] = {
-			{ FVector(     0.f,      0.f, 2200.f),   0.f,  900.f, true  },
-			{ FVector( -6000.f, -2000.f, 3400.f), 120.f, 1200.f, false },
-			{ FVector(  7000.f, -5000.f, 2800.f), 210.f, 1050.f, false },
-			{ FVector( -3000.f,  7500.f, 4200.f),  60.f,  800.f, true  },
-			{ FVector( 11000.f,  6000.f, 3000.f), 300.f, 1350.f, false },
+			{ FVector(     0.f,      0.f, 1200.f),   0.f,  900.f, true  },
+			{ FVector( -3500.f, -1600.f, 1750.f), 120.f, 1100.f, false },
+			{ FVector(  3200.f, -2600.f, 1400.f), 210.f, 1000.f, false },
+			{ FVector( -2000.f,  3000.f, 2150.f),  60.f,  800.f, true  },
+			{ FVector(  4500.f,  2300.f, 1550.f), 300.f, 1200.f, false },
 		};
 
 		for (const FUAVSpawn& Spawn : UAVs)
 		{
-			SpawnTarget(AEnemyDroneTarget::StaticClass(), Origin + Spawn.Offset, FRotator(0.f, Spawn.Yaw, 0.f),
+			// Over the runway, and at altitudes measured from the deck rather than world zero.
+			SpawnTarget(AEnemyDroneTarget::StaticClass(),
+				RunwayCentre + Spawn.Offset + FVector(0.f, 0.f, RunwayDeckZ), FRotator(0.f, Spawn.Yaw, 0.f),
 				[&Spawn](ADroneTarget* T)
 				{
 					if (AEnemyDroneTarget* D = Cast<AEnemyDroneTarget>(T))
 					{
 						D->PatrolSpeed = Spawn.Speed;
 						D->bPrimaryObjective = Spawn.bPrimary;
+
+						// Shorter arcs and a tight leash, so they work the airfield rather than
+						// crossing it and leaving.
+						D->ArcLength = 5000.f;
+						D->ArcHeight = 1000.f;
+						D->LoiterRadius = 6000.f;
 					}
 				});
 		}

@@ -63,6 +63,8 @@ void AEnemyDroneTarget::BeginPlay()
 	{
 		ArcDirection = FVector::ForwardVector;
 	}
+
+	HomeLocation = GetActorLocation();
 	BeginNewArc(GetActorLocation());
 
 	// Start partway along so several UAVs are not all at the same point in their arcs.
@@ -78,6 +80,17 @@ void AEnemyDroneTarget::BeginNewArc(const FVector& FromLocation)
 	// destroy the predictability that makes the pattern interceptable.
 	const float TurnDegrees = FMath::FRandRange(-ArcTurnVariance, ArcTurnVariance);
 	ArcDirection = ArcDirection.RotateAngleAxis(TurnDegrees, FVector::UpVector).GetSafeNormal2D();
+
+	// Steer back once it has drifted too far. Blended rather than snapped to a homeward heading,
+	// so the correction still looks like flying rather than a decision.
+	const FVector FromHome = (ArcStart - HomeLocation).GetSafeNormal2D();
+	const float DistanceFromHome = FVector::Dist2D(ArcStart, HomeLocation);
+
+	if (DistanceFromHome > LoiterRadius && !FromHome.IsNearlyZero())
+	{
+		const float Excess = FMath::Clamp((DistanceFromHome - LoiterRadius) / LoiterRadius, 0.f, 1.f);
+		ArcDirection = FMath::Lerp(ArcDirection, -FromHome, Excess * 0.7f).GetSafeNormal2D();
+	}
 
 	CurrentArcHeight = ArcHeight * FMath::FRandRange(0.75f, 1.3f);
 

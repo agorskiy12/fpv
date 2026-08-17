@@ -53,6 +53,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Drone|Arc")
 	float MinimumAltitude = 800.f;
 
+	/**
+	 * How far it may stray from where it was placed before it is steered back.
+	 *
+	 * Chained arcs each turn by a random amount, which is a random walk: given enough arcs it
+	 * wanders arbitrarily far and quietly leaves the play area. The leash biases the next arc
+	 * homeward once outside this radius, so it patrols an area instead of departing.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Drone|Arc")
+	float LoiterRadius = 7000.f;
+
 	/** Patrol route in actor-local space. Used only when bParabolicFlight is false. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Enemy Drone")
 	TArray<FVector> RoutePoints;
@@ -95,6 +105,7 @@ private:
 	float BobPhase = 0.f;
 
 	// Arc state
+	FVector HomeLocation = FVector::ZeroVector;
 	FVector ArcStart = FVector::ZeroVector;
 	FVector ArcDirection = FVector::ForwardVector;
 	float ArcProgress = 0.f;
