@@ -2,8 +2,10 @@
 #include "FPVDrone.h"
 #include "FPVDronePawn.h"
 
+#include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "Kismet/GameplayStatics.h"
+#include "UObject/ConstructorHelpers.h"
 
 AVehicleTarget::AVehicleTarget()
 {
@@ -12,7 +14,27 @@ AVehicleTarget::AVehicleTarget()
 	Kind = ETargetKind::Vehicle;
 	MaxHealth = 60.f;          // thin skinned; a solid hit kills it
 	ScoreValue = 250;
-	BodySize = FVector(480.f, 200.f, 160.f);
+
+	// Roughly a panel van. Gameplay reads this for blast falloff and HUD marker sizing, and the
+	// imported mesh is normalised to it, so the two cannot drift apart.
+	BodySize = FVector(520.f, 220.f, 240.f);
+
+	// The utility van FBX imported as two objects. Which is which is not knowable from the
+	// names, so the spawner varies them and the fleet is not all identical.
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> VanA(
+		TEXT("/Game/Fab/Utility_Vans/Object016.Object016"));
+	if (VanA.Succeeded())
+	{
+		BodyMesh = VanA.Object;
+	}
+
+	// The van is modelled with its length along Y (213 x 520 cm), while vehicles drive along
+	// their forward vector, +X. Without this they travel sideways down the runway.
+	MeshRotation = FRotator(0.f, -90.f, 0.f);
+
+	// Sit it on its wheels rather than half through the deck: the pivot is at the model's
+	// centre, so it needs lifting by half its height.
+	MeshOffset = FVector(0.f, 0.f, 95.f);
 	bSecondaryExplosion = true;
 	SecondaryBlastRadius = 700.f;
 	SecondaryBlastDamage = 70.f;

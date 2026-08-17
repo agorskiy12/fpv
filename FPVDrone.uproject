@@ -1,6 +1,6 @@
 {
 	"FileVersion": 3,
-	"EngineAssociation": "5.8",
+	"EngineAssociation": "{272615A9-4FEB-6661-08A7-31A1A3AC497C}",
 	"Category": "",
 	"Description": "First-person-view quadcopter simulator with acro-mode flight physics and a race course.",
 	"Modules": [
@@ -25,7 +25,10 @@
 		},
 		{
 			"Name": "GameInputWindows",
-			"Enabled": true
+			"Enabled": true,
+			"SupportedTargetPlatforms": [
+				"Win64"
+			]
 		},
 		{
 			"Name": "Niagara",

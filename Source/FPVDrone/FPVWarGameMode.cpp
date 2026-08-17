@@ -187,6 +187,13 @@ namespace
 			{  0.f, 1250.f, false, false },
 		};
 
+		// Both van variants from the imported FBX, so the traffic is not three of the same thing.
+		UStaticMesh* VanMeshes[2] = {
+			LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Fab/Utility_Vans/Object016.Object016")),
+			LoadObject<UStaticMesh>(nullptr, TEXT("/Game/Fab/Utility_Vans/Object017.Object017"))
+		};
+
+		int32 VanIndex = 0;
 		for (const FRunwayVehicle& Spec : RunwayVehicles)
 		{
 			const FVector Lane = RunwayCross * (LaneOffset * Spec.Lane);
@@ -199,7 +206,7 @@ namespace
 
 			SpawnTarget(AVehicleTarget::StaticClass(), Start,
 				FRotator(0.f, RunwayYaw + (Spec.bReversed ? 180.f : 0.f), 0.f),
-				[&Spec, Far](ADroneTarget* T)
+				[&Spec, Far, &VanMeshes, VanIndex](ADroneTarget* T)
 				{
 					if (AVehicleTarget* V = Cast<AVehicleTarget>(T))
 					{
@@ -209,8 +216,15 @@ namespace
 						V->bLoopRoute = true;
 						// Wide turns at the ends, so they sweep round instead of pivoting on the spot.
 						V->TurnRateDegrees = 55.f;
+
+						if (UStaticMesh* Chosen = VanMeshes[VanIndex % 2])
+						{
+							V->BodyMesh = Chosen;
+						}
 					}
 				});
+
+			++VanIndex;
 		}
 
 		// Infantry. Patrols along the deck edge and around the structures, so the place reads as
