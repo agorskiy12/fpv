@@ -1,4 +1,5 @@
 #include "FPVWarGameMode.h"
+#include "BannerMarker.h"
 #include "DroneTarget.h"
 #include "EnemyDroneTarget.h"
 #include "FPVDrone.h"
@@ -495,6 +496,32 @@ namespace
 				});
 
 			++PatrolIndex;
+		}
+
+		// Banners at each end of the deck, marking whose ground is whose. Deliberately offset
+		// from the operators -- a banner sitting on top of one would turn the hunt into flying
+		// to the nearest flag.
+		{
+			FActorSpawnParameters BannerParams;
+			BannerParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+			struct FBannerSpawn { FVector Offset; float Yaw; EFaction Faction; };
+			static const FBannerSpawn Banners[] = {
+				{ FVector(-27000.f,  2500.f, 0.f),  90.f, EFaction::Russia },
+				{ FVector( 27000.f, -2500.f, 0.f), -90.f, EFaction::NATO   },
+			};
+
+			for (const FBannerSpawn& Spawn : Banners)
+			{
+				const FVector Location = RunwayCentre + Spawn.Offset + FVector(0.f, 0.f, RunwayDeckZ);
+				if (ABannerMarker* Banner = World->SpawnActorDeferred<ABannerMarker>(
+					ABannerMarker::StaticClass(), FTransform(FRotator(0.f, Spawn.Yaw, 0.f), Location),
+					nullptr, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn))
+				{
+					Banner->Faction = Spawn.Faction;
+					Banner->FinishSpawning(FTransform(FRotator(0.f, Spawn.Yaw, 0.f), Location));
+				}
+			}
 		}
 
 		// One operator per side, at opposite ends of the deck and well apart, so finding one is
