@@ -166,11 +166,18 @@ public:
 	 * character.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float AirframeInstability = 0.65f;
+	float AirframeInstability = 0.35f;
 
-	/** Peak random disturbance in rad/s^2 at full instability. */
+	/**
+	 * Peak random disturbance in rad/s^2 at full instability.
+	 *
+	 * Has to stay well under the control authority it is competing with. A small correction --
+	 * PID_P of 0.25 against a 50 deg/s error -- produces roughly 12 rad/s^2, so a disturbance
+	 * anywhere near that swamps fine input entirely and the aircraft stops answering the sticks.
+	 * The first attempt at this used 60, which was five times the authority it was fighting.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
-	float DisturbanceStrength = 60.f;
+	float DisturbanceStrength = 13.f;
 
 	/**
 	 * How quickly the disturbance wanders, Hz.
@@ -187,23 +194,23 @@ public:
 	 * It never trims out, so the aircraft cannot be flown hands-off for even a moment.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
-	FVector PayloadImbalance = FVector(0.f, -9.f, 4.f);
+	FVector PayloadImbalance = FVector(0.f, -2.2f, 0.8f);
 
 	/** Multiplier on disturbance at full throttle versus idle. Thrust is what shakes it. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
-	float ThrottleShakeScale = 1.7f;
+	float ThrottleShakeScale = 1.3f;
 
 	/** Rate-loop gain retained at full instability. Lower means sloppier, later corrections. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
-	float InstabilityGainScale = 0.6f;
+	float InstabilityGainScale = 0.85f;
 
 	/** Motor lag multiplier at full instability. Heavy props spool slowly. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
-	float InstabilityMotorLagScale = 2.2f;
+	float InstabilityMotorLagScale = 1.4f;
 
 	/** Continuous vibration in the video feed, degrees at full instability. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
-	float CameraVibrationDegrees = 0.55f;
+	float CameraVibrationDegrees = 0.2f;
 
 	// ---------------------------------------------------------------------------------------
 	// Camera

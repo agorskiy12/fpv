@@ -14,12 +14,45 @@
 #include "GameFramework/PlayerController.h"
 #include "UObject/ConstructorHelpers.h"
 
+#include "HAL/IConsoleManager.h"
+#include "Kismet/GameplayStatics.h"
+
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+
+namespace
+{
+	/**
+	 * Handling is a feel parameter, and feel cannot be judged from a number -- it needs the
+	 * sticks in hand. Rebuilding to try 0.3 instead of 0.35 makes that loop far too slow, so
+	 * it is adjustable live.
+	 */
+	FAutoConsoleCommandWithWorldAndArgs CmdSetInstability(
+		TEXT("fpv.Instability"),
+		TEXT("Airframe instability, 0 (tuned racer) to 1 (heavy improvised bomber). No argument reports it."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+			[](const TArray<FString>& Args, UWorld* World)
+			{
+				AFPVDronePawn* Drone = Cast<AFPVDronePawn>(UGameplayStatics::GetPlayerPawn(World, 0));
+				if (!Drone)
+				{
+					return;
+				}
+
+				if (Args.Num() > 0)
+				{
+					Drone->AirframeInstability = FMath::Clamp(FCString::Atof(*Args[0]), 0.f, 1.f);
+				}
+
+				UE_LOG(LogFPV, Log, TEXT("Airframe instability %.2f (disturbance %.0f rad/s2 peak)"),
+					Drone->AirframeInstability,
+					Drone->DisturbanceStrength * Drone->AirframeInstability);
+			}));
+}
 
 AFPVDronePawn::AFPVDronePawn()
 {
