@@ -363,6 +363,31 @@ void AFPVDronePawn::Tick(float DeltaSeconds)
 	UpdateCameraShake(DeltaSeconds);
 }
 
+FVector AFPVDronePawn::ComputeAirframeDisturbance(float DeltaSeconds)
+{
+	const float Instability = FMath::Clamp(AirframeInstability, 0.f, 1.f);
+	if (Instability <= KINDA_SMALL_NUMBER)
+	{
+		return FVector::ZeroVector;
+	}
+
+	DisturbanceTime += DeltaSeconds * DisturbanceFrequency;
+
+	// Perlin rather than white noise. White noise is symmetric over any short window, so the
+	// rate loop cancels it and the aircraft merely buzzes; Perlin wanders, pushing it off
+	// heading for a second or two at a time, which has to be actively flown against.
+	const FVector Noise(
+		FMath::PerlinNoise1D(DisturbanceTime),
+		FMath::PerlinNoise1D(DisturbanceTime + 13.7f),
+		FMath::PerlinNoise1D(DisturbanceTime + 27.3f));
+
+	// Thrust is what shakes an airframe, so it is calm on the ground and worst under power --
+	// which is exactly when precision is wanted.
+	const float ThrottleFactor = FMath::Lerp(1.f, ThrottleShakeScale, SmoothedThrottle);
+
+	return (Noise * DisturbanceStrength + PayloadImbalance) * Instability * ThrottleFactor;
+}
+
 void AFPVDronePawn::AddImpactShake(float Trauma)
 {
 	CameraShake.Add(Trauma);
@@ -375,22 +400,26 @@ void AFPVDronePawn::UpdateCameraShake(float DeltaSeconds)
 		return;
 	}
 
-	const bool bWasActive = CameraShake.IsActive();
 	CameraShake.Update(DeltaSeconds);
 
-	if (!CameraShake.IsActive())
+	// Constant vibration through the airframe into the camera, on top of any blast shake.
+	// Fast and small -- this is the jello in the video feed, not the aircraft moving.
+	FRotator Vibration = FRotator::ZeroRotator;
+	const float Instability = FMath::Clamp(AirframeInstability, 0.f, 1.f);
+	if (Instability > KINDA_SMALL_NUMBER && CameraVibrationDegrees > 0.f)
 	{
-		// Snap back to the mount exactly once, rather than every frame forever.
-		if (bWasActive)
-		{
-			FPVCamera->SetRelativeLocation(CameraBaseLocation);
-			FPVCamera->SetRelativeRotation(CameraBaseRotation);
-		}
-		return;
+		const float Amount = CameraVibrationDegrees * Instability
+			* FMath::Lerp(0.35f, 1.f, SmoothedThrottle);
+		const float T = DisturbanceTime * 9.f;
+
+		Vibration = FRotator(
+			FMath::Sin(T * 7.3f) * Amount,
+			FMath::Sin(T * 5.9f + 1.1f) * Amount,
+			FMath::Sin(T * 8.7f + 2.3f) * Amount);
 	}
 
 	FPVCamera->SetRelativeLocation(CameraBaseLocation + CameraShake.GetLocationOffset(MaxShakeOffset));
-	FPVCamera->SetRelativeRotation(CameraBaseRotation + CameraShake.GetRotationOffset(MaxShakeAngle));
+	FPVCamera->SetRelativeRotation(CameraBaseRotation + CameraShake.GetRotationOffset(MaxShakeAngle) + Vibration);
 }
 
 void AFPVDronePawn::ApplyRCTransmitterInput()
@@ -472,10 +501,19 @@ void AFPVDronePawn::UpdateFlight(float DeltaSeconds)
 	const FVector Derivative = (Error - PreviousRateError) / DeltaSeconds;
 	PreviousRateError = Error;
 
+	// A sloppier tune corrects later and less firmly, which is most of why a heavy airframe
+	// feels like it is arguing with you rather than obeying.
+	const float Instability = FMath::Clamp(AirframeInstability, 0.f, 1.f);
+	const float GainScale = FMath::Lerp(1.f, InstabilityGainScale, Instability);
+
 	FVector AngularAccel(
-		Error.X * PID_P.X + RateIntegral.X * PID_I.X + Derivative.X * PID_D.X,
-		Error.Y * PID_P.Y + RateIntegral.Y * PID_I.Y + Derivative.Y * PID_D.Y,
-		Error.Z * PID_P.Z + RateIntegral.Z * PID_I.Z + Derivative.Z * PID_D.Z);
+		Error.X * PID_P.X * GainScale + RateIntegral.X * PID_I.X + Derivative.X * PID_D.X,
+		Error.Y * PID_P.Y * GainScale + RateIntegral.Y * PID_I.Y + Derivative.Y * PID_D.Y,
+		Error.Z * PID_P.Z * GainScale + RateIntegral.Z * PID_I.Z + Derivative.Z * PID_D.Z);
+
+	// Added after the controller, never inside it, so the rate loop has to fight the
+	// disturbance exactly as it would in the air rather than being fed a corrected target.
+	AngularAccel += ComputeAirframeDisturbance(DeltaSeconds);
 
 	AngularAccel = AngularAccel.BoundToCube(MaxAngularAccel);
 
@@ -487,8 +525,11 @@ void AFPVDronePawn::UpdateFlight(float DeltaSeconds)
 	// The stick reads -1..1; a real transmitter's throttle sits at -1 at the bottom of its throw.
 	const float TargetThrottle = FMath::Clamp((RawThrottle + 1.f) * 0.5f, 0.f, 1.f);
 
-	const float Alpha = (MotorResponseTime > KINDA_SMALL_NUMBER)
-		? 1.f - FMath::Exp(-DeltaSeconds / MotorResponseTime)
+	// Heavy props on a loaded airframe spool noticeably slower.
+	const float EffectiveMotorLag = MotorResponseTime * FMath::Lerp(1.f, InstabilityMotorLagScale, Instability);
+
+	const float Alpha = (EffectiveMotorLag > KINDA_SMALL_NUMBER)
+		? 1.f - FMath::Exp(-DeltaSeconds / EffectiveMotorLag)
 		: 1.f;
 	SmoothedThrottle = FMath::Lerp(SmoothedThrottle, TargetThrottle, Alpha);
 

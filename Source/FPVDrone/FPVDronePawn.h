@@ -150,6 +150,62 @@ public:
 	FVector DragCoefficients = FVector(0.0075f, 0.015f, 0.022f);
 
 	// ---------------------------------------------------------------------------------------
+	// Airframe character
+	//
+	// This is not a tuned freestyle quad. It is a heavy airframe with a warhead strapped
+	// underneath, flown on whatever tune it was given before someone sent it out. It wanders,
+	// it overshoots, and it never sits still.
+	// ---------------------------------------------------------------------------------------
+
+	/**
+	 * Master dial: 0 is a well-tuned racer, 1 is a heavy improvised bomber.
+	 *
+	 * Scales everything below together, because instability is not one effect. A badly tuned
+	 * heavy quad is simultaneously noisier, slower to respond, worse at holding an attitude and
+	 * unbalanced by its payload -- adjusting only one of those reads as a bug rather than as
+	 * character.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float AirframeInstability = 0.65f;
+
+	/** Peak random disturbance in rad/s^2 at full instability. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
+	float DisturbanceStrength = 60.f;
+
+	/**
+	 * How quickly the disturbance wanders, Hz.
+	 *
+	 * Deliberately low. Fast noise averages out inside the rate loop and is felt as vibration;
+	 * slow noise pushes the aircraft off heading and has to be actively flown against, which is
+	 * what makes it hard rather than merely rough.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
+	float DisturbanceFrequency = 1.8f;
+
+	/**
+	 * Constant bias from an off-centre warhead, rad/s^2 in pilot axes.
+	 * It never trims out, so the aircraft cannot be flown hands-off for even a moment.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
+	FVector PayloadImbalance = FVector(0.f, -9.f, 4.f);
+
+	/** Multiplier on disturbance at full throttle versus idle. Thrust is what shakes it. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
+	float ThrottleShakeScale = 1.7f;
+
+	/** Rate-loop gain retained at full instability. Lower means sloppier, later corrections. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
+	float InstabilityGainScale = 0.6f;
+
+	/** Motor lag multiplier at full instability. Heavy props spool slowly. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
+	float InstabilityMotorLagScale = 2.2f;
+
+	/** Continuous vibration in the video feed, degrees at full instability. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Drone|Airframe")
+	float CameraVibrationDegrees = 0.55f;
+
+	// ---------------------------------------------------------------------------------------
 	// Camera
 	// ---------------------------------------------------------------------------------------
 
@@ -338,6 +394,12 @@ private:
 	FImpactShake CameraShake;
 	FVector CameraBaseLocation = FVector::ZeroVector;
 	FRotator CameraBaseRotation = FRotator::ZeroRotator;
+
+	/** Advances the disturbance noise. Kept separate from world time so it survives dilation. */
+	float DisturbanceTime = 0.f;
+
+	/** Random disturbance plus payload bias, in pilot axes. */
+	FVector ComputeAirframeDisturbance(float DeltaSeconds);
 
 	void UpdateCameraShake(float DeltaSeconds);
 
