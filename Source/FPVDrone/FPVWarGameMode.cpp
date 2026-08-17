@@ -25,6 +25,13 @@
 
 namespace
 {
+	static TAutoConsoleVariable<int32> CVarSpawnGroundPlane(
+		TEXT("fpv.SpawnGroundPlane"),
+		1,
+		TEXT("Spawn the placeholder ground slab with the test targets.\n")
+		TEXT("Set to 0 once the level has a real Landscape, or the two will z-fight."),
+		ECVF_Default);
+
 	/** The drivable surface found on a scene mesh, in world space. */
 	struct FDeckSurface
 	{
@@ -180,6 +187,10 @@ namespace
 									  : FVector::ZeroVector;
 
 		// --- Ground ---------------------------------------------------------------------------
+		// Skipped once the level has a real Landscape. The procedural slab exists only so the
+		// scene is not floating in void; a Landscape supersedes it entirely, and landscape
+		// materials cannot be applied to a static mesh anyway.
+		if (CVarSpawnGroundPlane.GetValueOnGameThread() != 0)
 		// The Basic template floor is only a few tens of metres across, so everything placed
 		// further out floats over nothing and the sky shows through underneath -- which reads
 		// convincingly as water. A single large slab is enough to give the scene a floor.
