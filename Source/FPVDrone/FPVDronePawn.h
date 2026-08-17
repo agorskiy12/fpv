@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FPVFactions.h"
 #include "GameFramework/Pawn.h"
 #include "ImpactShake.h"
 #include "FPVDronePawn.generated.h"
@@ -29,12 +30,20 @@ struct FInputActionValue;
  * quad model and it will still fly identically.
  */
 UCLASS()
-class FPVDRONE_API AFPVDronePawn : public APawn
+class FPVDRONE_API AFPVDronePawn : public APawn, public IFactionMember
 {
 	GENERATED_BODY()
 
 public:
 	AFPVDronePawn();
+
+	/**
+	 * Read from the player state rather than stored here.
+	 *
+	 * The pawn is expendable by design -- it is destroyed on every strike -- so it cannot be
+	 * where allegiance lives. Falls back to Neutral when unpossessed.
+	 */
+	virtual EFaction GetFaction() const override;
 
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;

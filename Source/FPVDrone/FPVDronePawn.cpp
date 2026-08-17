@@ -1,6 +1,7 @@
 #include "FPVDronePawn.h"
 #include "ExplosionEffect.h"
 #include "FPVDrone.h"
+#include "FPVPlayerState.h"
 #include "FPVWarGameMode.h"
 #include "RCChannelMapping.h"
 #include "RCDeviceRegistry.h"
@@ -60,6 +61,15 @@ AFPVDronePawn::AFPVDronePawn()
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
+}
+
+EFaction AFPVDronePawn::GetFaction() const
+{
+	if (const AFPVPlayerState* State = GetPlayerState<AFPVPlayerState>())
+	{
+		return State->Faction;
+	}
+	return EFaction::Neutral;
 }
 
 void AFPVDronePawn::BeginPlay()

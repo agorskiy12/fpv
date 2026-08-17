@@ -21,9 +21,15 @@ becomes an objective by accident.
 Implement it as a small interface rather than a property on `ADroneTarget`, because the **player
 pawn also needs a faction** and it is not a target. Two classes, one question, one interface.
 
-Worth also implementing UE's `IGenericTeamAgentInterface` on top of it. It costs a single
-function, and it is what UE's AI perception uses to decide friend from foe — which step 4 of the
-battle plan will want. Adopting it now avoids retrofitting perception later.
+An earlier version of this note recommended implementing UE's `IGenericTeamAgentInterface` on
+top straight away, on the grounds that it costs a single function. **That was wrong.**
+`GenericTeamAgentInterface.h` lives in AIModule, not Engine, so adopting it means adding a whole
+module dependency for a bridge nothing crosses yet.
+
+Instead `FPVFaction::ToTeamIndex` returns the same team numbering as a plain integer — 0 Russia,
+1 NATO, 255 no team, matching `FGenericTeamId::NoTeam`. When infantry perception arrives, add
+AIModule then and implement the interface over the existing mapping; it really is a few lines
+per class at that point.
 
 ## 2. One rule, in one place
 

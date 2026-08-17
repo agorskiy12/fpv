@@ -4,6 +4,7 @@
 #include "FPVDrone.h"
 #include "FPVDronePawn.h"
 #include "FPVHUD.h"
+#include "FPVPlayerState.h"
 #include "HelicopterTarget.h"
 #include "SoldierTarget.h"
 #include "StrikeCamera.h"
@@ -547,6 +548,77 @@ namespace
 		UE_LOG(LogFPV, Log, TEXT("Spawned test targets around %s"), *Origin.ToCompactString());
 	}
 
+	/** Parses a faction name, tolerating case and the obvious abbreviations. */
+	bool ParseFaction(const FString& Text, EFaction& OutFaction)
+	{
+		const FString Lower = Text.ToLower();
+		if (Lower == TEXT("russia") || Lower == TEXT("ru") || Lower == TEXT("red"))
+		{
+			OutFaction = EFaction::Russia;
+			return true;
+		}
+		if (Lower == TEXT("nato") || Lower == TEXT("blue"))
+		{
+			OutFaction = EFaction::NATO;
+			return true;
+		}
+		if (Lower == TEXT("neutral") || Lower == TEXT("none"))
+		{
+			OutFaction = EFaction::Neutral;
+			return true;
+		}
+		return false;
+	}
+
+	FAutoConsoleCommandWithWorldAndArgs CmdSetPlayerFaction(
+		TEXT("fpv.SetFaction"),
+		TEXT("Set the operator's side: russia, nato or neutral."),
+		FConsoleCommandWithWorldAndArgsDelegate::CreateStatic(
+			[](const TArray<FString>& Args, UWorld* World)
+			{
+				EFaction Faction;
+				if (Args.Num() < 1 || !ParseFaction(Args[0], Faction))
+				{
+					UE_LOG(LogFPV, Warning, TEXT("Usage: fpv.SetFaction <russia|nato|neutral>"));
+					return;
+				}
+
+				APlayerController* PC = World ? World->GetFirstPlayerController() : nullptr;
+				if (AFPVPlayerState* State = PC ? PC->GetPlayerState<AFPVPlayerState>() : nullptr)
+				{
+					State->SetFaction(Faction);
+				}
+			}));
+
+	FAutoConsoleCommandWithWorld CmdReportFactions(
+		TEXT("fpv.Factions"),
+		TEXT("List every unit's faction and its attitude toward the operator."),
+		FConsoleCommandWithWorldDelegate::CreateStatic([](UWorld* World)
+		{
+			if (!World)
+			{
+				return;
+			}
+
+			const APawn* Player = UGameplayStatics::GetPlayerPawn(World, 0);
+			UE_LOG(LogFPV, Log, TEXT("Operator: %s"),
+				FPVFaction::GetDisplayName(FPVFaction::GetFactionOf(Player)));
+
+			int32 Friendly = 0, Hostile = 0, NeutralCount = 0;
+			for (TActorIterator<ADroneTarget> It(World); It; ++It)
+			{
+				switch (FPVFaction::GetAttitude(Player, *It))
+				{
+				case EFactionAttitude::Friendly: ++Friendly; break;
+				case EFactionAttitude::Hostile:  ++Hostile;  break;
+				default:                         ++NeutralCount; break;
+				}
+			}
+
+			UE_LOG(LogFPV, Log, TEXT("Units -- hostile %d, friendly %d, neutral %d"),
+				Hostile, Friendly, NeutralCount);
+		}));
+
 	FAutoConsoleCommandWithWorld CmdSpawnTestTargets(
 		TEXT("fpv.SpawnTestTargets"),
 		TEXT("Drop a mixed set of targets around the player: structures, a gas line, a substation, two vehicles and two UAVs."),
@@ -557,6 +629,7 @@ AFPVWarGameMode::AFPVWarGameMode()
 {
 	DefaultPawnClass = AFPVDronePawn::StaticClass();
 	HUDClass = AFPVHUD::StaticClass();
+	PlayerStateClass = AFPVPlayerState::StaticClass();
 
 	// Ticks to drive the post-strike sequence.
 	PrimaryActorTick.bCanEverTick = true;

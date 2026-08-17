@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "FPVFactions.h"
 #include "GameFramework/Actor.h"
 #include "DroneTarget.generated.h"
 
@@ -38,12 +39,21 @@ enum class ETargetKind : uint8
  * legible enough to identify from the air, which is all the flying actually needs.
  */
 UCLASS()
-class FPVDRONE_API ADroneTarget : public AActor
+class FPVDRONE_API ADroneTarget : public AActor, public IFactionMember
 {
 	GENERATED_BODY()
 
 public:
 	ADroneTarget();
+
+	/**
+	 * Which side this belongs to. Neutral means scenery -- destructible, but worth nothing and
+	 * counting toward nothing.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Target|Faction")
+	EFaction Faction = EFaction::Neutral;
+
+	virtual EFaction GetFaction() const override { return Faction; }
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
