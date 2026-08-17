@@ -11,12 +11,13 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
-#include "PhysicsEngine/BodySetup.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "HAL/IConsoleManager.h"
 #include "Kismet/GameplayStatics.h"
+#include "Materials/MaterialInterface.h"
+#include "PhysicsEngine/BodySetup.h"
 #include "TimerManager.h"
 
 namespace
@@ -174,6 +175,49 @@ namespace
 		const APawn* Player = UGameplayStatics::GetPlayerPawn(World, 0);
 		const FVector Origin = Player ? FVector(Player->GetActorLocation().X, Player->GetActorLocation().Y, 0.f)
 									  : FVector::ZeroVector;
+
+		// --- Ground ---------------------------------------------------------------------------
+		// The Basic template floor is only a few tens of metres across, so everything placed
+		// further out floats over nothing and the sky shows through underneath -- which reads
+		// convincingly as water. A single large slab is enough to give the scene a floor.
+		{
+			if (UStaticMesh* CubeMesh = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")))
+			{
+				constexpr float GroundExtent = 800000.f;   // 8 km across, comfortably past everything
+				constexpr float GroundThickness = 400.f;
+
+				// Top sits just below zero so it does not z-fight with the template floor, which
+				// is coplanar at the origin.
+				const FVector GroundCentre = Origin + FVector(22500.f, 0.f, -10.f - GroundThickness * 0.5f);
+
+				FActorSpawnParameters GroundParams;
+				GroundParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+				if (AStaticMeshActor* Ground = World->SpawnActor<AStaticMeshActor>(
+					AStaticMeshActor::StaticClass(), GroundCentre, FRotator::ZeroRotator, GroundParams))
+				{
+					UStaticMeshComponent* GroundComponent = Ground->GetStaticMeshComponent();
+					GroundComponent->SetMobility(EComponentMobility::Movable);
+					GroundComponent->SetStaticMesh(CubeMesh);
+					GroundComponent->SetWorldScale3D(FVector(
+						GroundExtent / 100.f, GroundExtent / 100.f, GroundThickness / 100.f));
+					GroundComponent->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+
+					if (UMaterialInterface* GroundMaterial = LoadObject<UMaterialInterface>(
+						nullptr, TEXT("/Engine/BasicShapes/BasicShapeMaterial.BasicShapeMaterial")))
+					{
+						GroundComponent->SetMaterial(0, GroundMaterial);
+					}
+
+					// Same trap as the runway: the mesh and scale are set after spawning, so the
+					// collision body has to be rebuilt or nothing will land on it.
+					GroundComponent->RecreatePhysicsState();
+
+					UE_LOG(LogFPV, Log, TEXT("Ground plane: %.0f m across, top at Z=%.0f"),
+						GroundExtent / 100.f, -10.f);
+				}
+			}
+		}
 
 		// --- Runway ---------------------------------------------------------------------------
 		// Placed first, and everything else is laid out relative to it. The route is derived
